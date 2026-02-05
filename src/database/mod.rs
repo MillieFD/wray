@@ -13,10 +13,11 @@ mod spectra;
 mod spectrometers;
 mod table;
 
-use measurements::*;
-use spectrometers::*;
 use std::fs;
 use std::path::PathBuf;
+
+use measurements::*;
+use spectrometers::*;
 use table::*;
 
 struct Database {
@@ -42,9 +43,11 @@ impl Database {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use polars::prelude::*;
     use std::path::Path;
+
+    use polars::prelude::*;
+
+    use super::*;
 
     #[test]
     fn database_creation() {
@@ -52,9 +55,9 @@ mod tests {
         assert!(db.path.exists());
     }
 
-    fn inspect_parquet_schema(path: &Path) {
+    fn inspect_ipc_schema(path: &Path) {
         let file = fs::File::open(path).unwrap();
-        let mut reader = ParquetReader::new(file);
+        let mut reader = IpcStreamReader::new(file);
         let schema = reader.schema().unwrap();
         println!("{:?}", schema);
     }

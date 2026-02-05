@@ -8,24 +8,26 @@ Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the conditions of the LICENSE are met.
 */
 
-use super::Table;
-use DataType::*;
-use polars::prelude::*;
 use std::fs;
 use std::io::Error;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-pub(super) struct Spectrometers;
+use DataType::*;
+use polars::prelude::*;
+
+use super::Table;
+
+pub(super) struct Spectrometers {
+    path: PathBuf,
+}
 
 impl Spectrometers {
     pub(super) fn new(path: &Path) -> Result<Spectrometers, Error> {
-        let mut file = fs::File::create(&path.join("spectrometers.parquet"))?;
+        let path = path.join("spectrometers.ipc");
+        let mut file = fs::File::create(&path)?;
         let mut df = Self::empty();
-        ParquetWriter::new(&mut file)
-            .with_compression(ParquetCompression::Zstd(None))
-            .finish(&mut df)
-            .unwrap();
-        Ok(Spectrometers {})
+        IpcStreamWriter::new(&mut file).finish(&mut df).unwrap();
+        Ok(Spectrometers { path })
     }
 }
 

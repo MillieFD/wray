@@ -8,17 +8,19 @@ Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the conditions of the LICENSE are met.
 */
 
-use super::Table;
-use DataType::{Float64, UInt8, UInt32};
-use polars::prelude::*;
 use std::fs::File;
 use std::io::Error;
 use std::path::{Path, PathBuf};
+
+use DataType::{Float64, UInt8, UInt32};
+use polars::prelude::*;
 use uom::si::f64::{Length, Time};
+
+use super::Table;
 
 pub(super) struct Measurements {
     path: PathBuf,
-    dataframe: DataFrame,
+    height: usize,
 }
 
 impl Measurements {
@@ -26,14 +28,13 @@ impl Measurements {
     where
         P: AsRef<Path>,
     {
-        let path = path.as_ref().join("measurements.parquet");
+        let path = path.as_ref().join("measurements.ipc");
         let mut file = File::create(&path)?;
         let mut dataframe = Self::empty();
-        ParquetWriter::new(&mut file)
-            .with_compression(ParquetCompression::Zstd(None))
+        IpcStreamWriter::new(&mut file)
             .finish(&mut dataframe)
             .unwrap();
-        let m = Measurements { path, dataframe };
+        let m = Measurements { path, height: 0 };
         Ok(m)
     }
 
@@ -46,9 +47,32 @@ impl Measurements {
         integration: Time,
         spectrometer: u8,
     ) -> Result<u32, Error> {
-        let next = self.dataframe.height();
-        let timestamp = std::time::SystemTime::now();
-        unimplemented!()
+        let id = self.height as u32;
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+
+        let mut new_row = df!(
+            "id" => [id],
+            "timestamp" => [timestamp],
+            "x" => [x.value],
+            "y" => [y.value],
+            "z" => [z.value],
+            "interfibre" => [interfibre.value],
+            "integration" => [integration.value],
+            "spectrometer_id" => [spectrometer],
+        )
+        .map_err(|e| Error::new(std::io::ErrorKind::Other, e))?;
+
+        let mut file = std::fs::OpenOptions::new().append(true).open(&self.path)?;
+
+        IpcStreamWriter::new(&mut file)
+            .finish(&mut new_row)
+            .map_err(|e| Error::new(std::io::ErrorKind::Other, e))?;
+
+        self.height += 1;
+        Ok(id)
     }
 }
 
@@ -69,16 +93,48 @@ impl Table for Measurements {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs;
 
+    use super::*;
+
     #[test]
-    fn inspect_measurements_parquet_schema() {
+    fn test_add_measurements() {
         let temp = std::env::temp_dir();
-        let m = Measurements::new(&temp).unwrap();
-        let file = File::open(&m.path).unwrap();
-        let schema = ParquetReader::new(file).schema().unwrap();
-        println!("{:?}", schema);
+        let mut m = Measurements::new(&temp).unwrap();
+
+        use uom::si::length::meter;
+        use uom::si::time::second;
+
+        m.add(
+            Length::new::<meter>(1.0),
+            Length::new::<meter>(2.0),
+            Length::new::<meter>(3.0),
+            Length::new::<meter>(0.1),
+            Time::new::<second>(0.5),
+            1,
+        )
+        .unwrap();
+
+        m.add(
+            Length::new::<meter>(4.0),
+            Length::new::<meter>(5.0),
+            Length::new::<meter>(6.0),
+            Length::new::<meter>(0.2),
+            Time::new::<second>(1.0),
+            2,
+        )
+        .unwrap();
+
+        let mut file = File::open(&m.path).unwrap();
+        let df0 = IpcStreamReader::new(&mut file).finish().unwrap();
+        let df1 = IpcStreamReader::new(&mut file).finish().unwrap();
+        let df2 = IpcStreamReader::new(&mut file).finish().unwrap();
+
+        assert_eq!(df0.height(), 0);
+        assert_eq!(df1.height(), 1);
+        assert_eq!(df2.height(), 1);
+        assert_eq!(m.height, 2);
+
         fs::remove_file(m.path).unwrap();
     }
 }

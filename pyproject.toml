@@ -8,9 +8,9 @@ version = "0.1.0"
 description = "Standardised data storage for diffuse reflectance spectroscopy imaging"
 readme = "README.md"
 authors = [
-    {name = "Amelia Fraser-Dale"}
+    { name = "Amelia Fraser-Dale" }
 ]
-license = {text = "BSD-3-Clause"}
+license = { text = "BSD-3-Clause" }
 keywords = ["database", "data-storage", "spectroscopy", "imaging", "optics"]
 classifiers = [
     "Development Status :: 3 - Alpha",

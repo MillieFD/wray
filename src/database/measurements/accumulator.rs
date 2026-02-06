@@ -69,14 +69,14 @@ impl Accumulator {
 
     pub(super) fn columns(&mut self) -> Vec<Arc<dyn Array>> {
         vec![
-            Arc::new(UInt32Builder::finish(&mut self.id)),
-            Arc::new(UInt64Builder::finish(&mut self.timestamp)),
-            Arc::new(Int32Builder::finish(&mut self.x)),
-            Arc::new(Int32Builder::finish(&mut self.y)),
-            Arc::new(Int32Builder::finish(&mut self.z)),
-            Arc::new(Int32Builder::finish(&mut self.a)),
-            Arc::new(UInt32Builder::finish(&mut self.duration)),
-            Arc::new(UInt8Builder::finish(&mut self.spectrometer)),
+            Arc::new(self.id.finish()),
+            Arc::new(self.timestamp.finish()),
+            Arc::new(self.x.finish()),
+            Arc::new(self.y.finish()),
+            Arc::new(self.z.finish()),
+            Arc::new(self.a.finish()),
+            Arc::new(self.duration.finish()),
+            Arc::new(self.spectrometer.finish()),
         ]
     }
 }

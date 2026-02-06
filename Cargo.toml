@@ -12,7 +12,7 @@ repository = "https://github.com/MillieFD/optic"
 # See a full list of keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-arrow = "57.2"
+arrow = "57.3"
 
 [dependencies.polars]
 version = "0.52"

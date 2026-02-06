@@ -12,7 +12,7 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 mod accumulator;
 
-/* ----------------------------------------------------------------------------- Private Exports */
+/* ----------------------------------------------------------------------------- Private Imports */
 
 use std::fs::File;
 use std::path::Path;

@@ -26,7 +26,7 @@ use arrow::error::ArrowError;
 use arrow::ipc::writer::StreamWriter;
 use arrow::record_batch::RecordBatch;
 
-use super::traits::Writer;
+use super::Writer;
 use crate::Error;
 
 /* ------------------------------------------------------------------------------ Public Exports */

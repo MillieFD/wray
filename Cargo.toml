@@ -11,6 +11,9 @@ repository = "https://github.com/MillieFD/optic"
 
 # See a full list of keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[dependencies]
+arrow = "57.2"
+
 [dependencies.polars]
 version = "0.52"
 features = ["simd", "performant", "ipc", "ipc_streaming"]
@@ -22,4 +25,4 @@ features = ["extension-module"]
 [dependencies.uom]
 version = "0.37"
 default-features = false
-features = ["si", "f64"]
+features = ["si", "i32", "u32"]

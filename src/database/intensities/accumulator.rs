@@ -12,7 +12,7 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 use std::sync::Arc;
 
-use arrow::array::{Array, Float64Builder, UInt32Builder};
+use arrow::array::{ArrayRef, Float64Builder, UInt32Builder};
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
@@ -42,13 +42,13 @@ impl Accumulator {
         self.len += 1;
     }
 
-    pub(super) fn columns(&mut self) -> Vec<Arc<dyn Array>> {
+    pub(super) fn columns(&mut self) -> Vec<ArrayRef> {
         self.data
             .iter_mut()
-            .map(|builder| Arc::new(builder.finish()) as Arc<dyn Array>)
+            .map(|builder| Arc::new(builder.finish()) as ArrayRef)
             .chain([
-                Arc::new(self.id.finish()) as Arc<dyn Array>,
-                Arc::new(self.measurement.finish()) as Arc<dyn Array>,
+                Arc::new(self.id.finish()) as ArrayRef,
+                Arc::new(self.measurement.finish()) as ArrayRef,
             ])
             .collect()
     }

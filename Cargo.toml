@@ -11,12 +11,8 @@ repository = "https://github.com/MillieFD/optic"
 
 # See a full list of keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[dependencies]
-arrow = "57.3"
-
-[dependencies.polars]
-version = "0.52"
-features = ["simd", "performant", "ipc", "ipc_streaming"]
+[dependencies.arrow]
+version = "57.3"
 
 [dependencies.pyo3]
 version = "0.28"

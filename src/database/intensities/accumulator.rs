@@ -17,39 +17,33 @@ use arrow::array::{ArrayRef, Float64Builder, UInt32Builder};
 /* ------------------------------------------------------------------------------ Public Exports */
 
 pub(super) struct Accumulator {
-    len: u32,
-    data: Vec<Float64Builder>,
-    id: UInt32Builder,
     measurement: UInt32Builder,
+    wavelength: UInt32Builder,
+    intensity: Float64Builder,
 }
 
 impl Accumulator {
-    pub(super) fn new(n_wavelengths: usize) -> Self {
+    pub(super) fn new() -> Self {
         Self {
-            len: 0,
-            data: (0..n_wavelengths).map(|i| Float64Builder::new()).collect(),
-            id: Default::default(),
             measurement: Default::default(),
+            wavelength: Default::default(),
+            intensity: Default::default(),
         }
     }
 
-    pub fn push(&mut self, measurement: u32, data: Vec<f64>) {
-        self.id.append_value(self.len);
+    pub fn push(&mut self, measurement: u32, wavelengths: Vec<u32>, intensities: Vec<f64>) {
         self.measurement.append_value(measurement);
-        self.data.iter_mut().zip(data).for_each(|(builder, value)| {
-            builder.append_value(value);
-        });
-        self.len += 1;
+        wavelengths.into_iter().zip(intensities).for_each(|(λ, i)| {
+            self.wavelength.append_value(λ);
+            self.intensity.append_value(i);
+        })
     }
 
     pub(super) fn columns(&mut self) -> Vec<ArrayRef> {
-        self.data
-            .iter_mut()
-            .map(|builder| Arc::new(builder.finish()) as ArrayRef)
-            .chain([
-                Arc::new(self.id.finish()) as ArrayRef,
-                Arc::new(self.measurement.finish()) as ArrayRef,
-            ])
-            .collect()
+        vec![
+            Arc::new(self.measurement.finish()),
+            Arc::new(self.wavelength.finish()),
+            Arc::new(self.intensity.finish()),
+        ]
     }
 }

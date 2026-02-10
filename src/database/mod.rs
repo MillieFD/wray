@@ -10,10 +10,9 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 /* ----------------------------------------------------------------------------- Private Modules */
 
+mod intensities;
 mod measurements;
-mod spectra;
-mod spectrometers;
-mod table;
+mod wavelengths;
 mod writer;
 
 /* ----------------------------------------------------------------------------- Private Imports */
@@ -21,9 +20,9 @@ mod writer;
 use std::fs;
 use std::path::PathBuf;
 
+use intensities::*;
 use measurements::*;
-use spectra::*;
-use spectrometers::*;
+use wavelengths::*;
 use writer::*;
 
 use crate::Error;

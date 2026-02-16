@@ -42,7 +42,7 @@ impl MeasurementWriter {
     where
         P: AsRef<Path>,
     {
-        let path = path.as_ref().join("measurements").with_extension("ipc");
+        let path = path.as_ref().join("measurements").with_extension("arrow");
         let writer = File::create(path)?.try_into()?;
         Ok(writer)
     }

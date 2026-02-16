@@ -40,7 +40,7 @@ impl IntensityWriter {
     where
         P: AsRef<Path>,
     {
-        let path = path.as_ref().join("intensities").with_extension("ipc");
+        let path = path.as_ref().join("intensities").with_extension("arrow");
         let writer = File::create(path)?.try_into()?;
         Ok(writer)
     }

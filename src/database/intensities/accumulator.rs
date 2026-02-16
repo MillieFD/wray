@@ -31,9 +31,9 @@ impl Accumulator {
         }
     }
 
-    pub fn push(&mut self, measurement: u32, wavelengths: Vec<u32>, intensities: Vec<f64>) {
-        self.measurement.append_value(measurement);
+    pub fn append(&mut self, measurement: u32, wavelengths: Vec<u32>, intensities: Vec<f64>) {
         wavelengths.into_iter().zip(intensities).for_each(|(λ, i)| {
+            self.measurement.append_value(measurement);
             self.wavelength.append_value(λ);
             self.intensity.append_value(i);
         })

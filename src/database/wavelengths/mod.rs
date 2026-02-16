@@ -56,7 +56,6 @@ impl WavelengthWriter {
             .truncate(true)
             .open(path)?
             .try_into()?;
-        // let writer = File::create(path)?.try_into()?;
         Ok(writer)
     }
 

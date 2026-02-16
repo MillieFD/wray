@@ -87,7 +87,7 @@ impl WavelengthWriter {
             })
     }
 
-    fn push(&mut self, wavelengths: &[f64]) -> Result<Vec<u32>, ArrowError> {
+    pub(super) fn push(&mut self, wavelengths: Vec<f64>) -> Result<Vec<u32>, ArrowError> {
         const TOLERANCE: f64 = 1E-12;
         let mut records = self.read();
         records.sort_unstable(); // In-place sort does not allocate

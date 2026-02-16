@@ -21,17 +21,18 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock};
 
-use accumulator::*;
 use arrow::array::{Array, AsArray, Datum, RecordBatch};
 use arrow::datatypes::DataType::{Float64, UInt32};
 use arrow::datatypes::{Field, Float64Type, Schema, UInt32Type};
 use arrow::error::ArrowError;
 use arrow::ipc::reader::StreamReader;
 use arrow::ipc::writer::StreamWriter;
-use record::*;
+use pyo3::prelude::*;
 use uom::si::f64::Length;
 use uom::si::length::nanometer;
 
+use self::accumulator::*;
+use self::record::*;
 use super::Writer;
 use crate::Error;
 
@@ -111,7 +112,7 @@ impl WavelengthWriter {
         let columns = self.acc.columns();
         let batch = RecordBatch::try_new(Self::schema(), columns).unwrap();
         self.writer.write(&batch).expect("Failed to write batch");
-        // TODO: Handle errors gracefully≈
+        // TODO: Handle errors gracefully
     }
 }
 
@@ -149,14 +150,4 @@ impl TryFrom<&Path> for WavelengthWriter {
     fn try_from(path: &Path) -> Result<Self, Self::Error> {
         Self::new(path)
     }
-}
-
-impl Writer for WavelengthWriter {
-    const SCHEMA: LazyLock<Arc<Schema>> = LazyLock::new(|| {
-        let fields = [
-            Field::new("id", UInt32, false).into(),
-            Field::new("nm", Float64, false).into(),
-        ];
-        Schema::new(fields).into()
-    });
 }

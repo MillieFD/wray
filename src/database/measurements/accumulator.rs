@@ -11,60 +11,62 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 /* ----------------------------------------------------------------------------- Private Imports */
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::SystemTime;
 
-use arrow::array::{Array, Int32Builder, UInt8Builder, UInt32Builder, UInt64Builder};
-use uom::si::i32::Length;
+use arrow::array::{
+    Array,
+    DurationMicrosecondBuilder,
+    Int32Builder,
+    TimestampMillisecondBuilder,
+    UInt32Builder,
+};
+use uom::si::f64::{Length, Time};
 use uom::si::length::micrometer;
 use uom::si::time::microsecond;
-use uom::si::u32::Time;
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
 pub(super) struct Accumulator {
-    rows: u32,
+    next: AtomicU32,
     id: UInt32Builder,
-    timestamp: UInt64Builder,
+    timestamp: TimestampMillisecondBuilder,
     x: Int32Builder,
     y: Int32Builder,
     z: Int32Builder,
-    a: Int32Builder,
-    // r: Int32Builder,
-    duration: UInt32Builder,
-    spectrometer: UInt8Builder,
+    a: UInt32Builder,
+    integration: DurationMicrosecondBuilder,
 }
 
 impl Accumulator {
     pub(super) fn new() -> Self {
         Self {
-            rows: 0,
+            next: Default::default(), // TODO: next read from existing or 0,
             id: Default::default(),
             timestamp: Default::default(),
             x: Default::default(),
             y: Default::default(),
             z: Default::default(),
             a: Default::default(),
-            // r: Default::default(),
-            duration: Default::default(),
-            spectrometer: Default::default(),
+            integration: Default::default(),
         }
     }
 
-    pub fn push(&mut self, x: Length, y: Length, z: Length, a: Length, i: Time, spectrometer: u8) {
-        let timestamp = SystemTime::UNIX_EPOCH
+    pub fn append(&mut self, x: Length, y: Length, z: Length, a: Length, i: Time) {
+        // Calculate values
+        let timestamp: i64 = SystemTime::UNIX_EPOCH
             .elapsed()
             .unwrap_or_default()
-            .as_millis() as u64;
-        self.id.append_value(self.rows);
+            .as_millis() as i64;
+        let id: u32 = self.next.fetch_add(1, Ordering::Relaxed);
+        // Append values to IPC Array Builders
+        self.id.append_value(id);
         self.timestamp.append_value(timestamp);
-        self.x.append_value(x.get::<micrometer>());
-        self.y.append_value(y.get::<micrometer>());
-        self.z.append_value(z.get::<micrometer>());
-        self.a.append_value(a.get::<micrometer>());
-        // self.r.append_value(r.get::<radian>());
-        self.duration.append_value(i.get::<microsecond>());
-        self.spectrometer.append_value(spectrometer);
-        self.rows += 1;
+        self.x.append_value(x.get::<micrometer>() as i32);
+        self.y.append_value(y.get::<micrometer>() as i32);
+        self.z.append_value(z.get::<micrometer>() as i32);
+        self.a.append_value(a.get::<micrometer>() as u32);
+        self.integration.append_value(i.get::<microsecond>() as i64);
     }
 
     pub(super) fn columns(&mut self) -> Vec<Arc<dyn Array>> {
@@ -75,8 +77,7 @@ impl Accumulator {
             Arc::new(self.y.finish()),
             Arc::new(self.z.finish()),
             Arc::new(self.a.finish()),
-            Arc::new(self.duration.finish()),
-            Arc::new(self.spectrometer.finish()),
+            Arc::new(self.integration.finish()),
         ]
     }
 }

@@ -15,9 +15,10 @@ mod record;
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
-use std::fs::File;
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Seek};
 use std::ops::Sub;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock};
 
@@ -41,6 +42,7 @@ use crate::Error;
 pub(super) struct WavelengthWriter {
     writer: StreamWriter<File>,
     acc: Accumulator,
+    path: PathBuf,
 }
 
 impl WavelengthWriter {
@@ -49,20 +51,24 @@ impl WavelengthWriter {
         P: AsRef<Path>,
     {
         let path = path.as_ref().join("wavelengths").with_extension("arrow");
-        let writer = OpenOptions::new()
+        let file = OpenOptions::new()
             .write(true)
             .read(true)
             .create(true)
             .truncate(true)
-            .open(path)?
-            .try_into()?;
+            .open(&path)?;
+        let writer = Self {
+            writer: StreamWriter::try_new(file, &Self::SCHEMA)?,
+            acc: Accumulator::new(),
+            path: path.to_path_buf(),
+        };
         Ok(writer)
     }
 
     fn read(&self) -> Vec<Record> {
-        let file = self.writer.get_ref();
+        let file = File::open(&self.path).expect("Unable to open 'wavelengths' file");
         StreamReader::try_new(file, None)
-            .expect("Unable to read 'wavelengths.ipc' file")
+            .expect("Unable to read 'wavelengths' file")
             .filter_map(Result::ok)
             .fold(Vec::new(), |mut records, batch| {
                 let nms = batch
@@ -132,22 +138,6 @@ impl Writer for WavelengthWriter {
         ];
         Schema::new(fields).into()
     });
-}
-
-impl TryFrom<File> for WavelengthWriter {
-    type Error = ArrowError;
-
-    fn try_from(file: File) -> Result<Self, Self::Error> {
-        let writer = StreamWriter::try_new(file, &Self::SCHEMA)?.into();
-        Ok(writer)
-    }
-}
-
-impl From<StreamWriter<File>> for WavelengthWriter {
-    fn from(writer: StreamWriter<File>) -> Self {
-        let acc = Accumulator::new();
-        Self { writer, acc }
-    }
 }
 
 impl TryFrom<&Path> for WavelengthWriter {

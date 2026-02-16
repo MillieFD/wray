@@ -48,8 +48,15 @@ impl WavelengthWriter {
     where
         P: AsRef<Path>,
     {
-        let path = path.as_ref().join("wavelengths").with_extension("ipc");
-        let writer = File::create(path)?.try_into()?;
+        let path = path.as_ref().join("wavelengths").with_extension("arrow");
+        let writer = OpenOptions::new()
+            .write(true)
+            .read(true)
+            .create(true)
+            .truncate(true)
+            .open(path)?
+            .try_into()?;
+        // let writer = File::create(path)?.try_into()?;
         Ok(writer)
     }
 

@@ -117,6 +117,16 @@ impl WavelengthWriter {
 
 /* ----------------------------------------------------------------------- Trait Implementations */
 
+impl Writer for WavelengthWriter {
+    const SCHEMA: LazyLock<Arc<Schema>> = LazyLock::new(|| {
+        let fields = [
+            Field::new("id", UInt32, false).into(),
+            Field::new("nm", Float64, false).into(),
+        ];
+        Schema::new(fields).into()
+    });
+}
+
 impl TryFrom<File> for WavelengthWriter {
     type Error = ArrowError;
 

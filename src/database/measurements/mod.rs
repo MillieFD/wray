@@ -18,14 +18,15 @@ use std::fs::File;
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
 
-use accumulator::*;
 use arrow::datatypes::DataType::{Int32, Timestamp, UInt32};
 use arrow::datatypes::TimeUnit::Microsecond;
 use arrow::datatypes::{Field, Schema};
 use arrow::error::ArrowError;
 use arrow::ipc::writer::StreamWriter;
 use arrow::record_batch::RecordBatch;
+use uom::si::f64::{Length, Time};
 
+use self::accumulator::*;
 use super::Writer;
 use crate::Error;
 
@@ -46,6 +47,10 @@ impl MeasurementWriter {
         Ok(writer)
     }
 
+    pub fn push(&mut self, x: Length, y: Length, z: Length, a: Length, i: Time) {
+        self.acc.append(x, y, z, a, i)
+    }
+
     pub fn commit(&mut self) {
         let columns = self.acc.columns();
         let batch = RecordBatch::try_new(Self::schema(), columns).unwrap();
@@ -54,6 +59,22 @@ impl MeasurementWriter {
 }
 
 /* ----------------------------------------------------------------------- Trait Implementations */
+
+impl Writer for MeasurementWriter {
+    const SCHEMA: LazyLock<Arc<Schema>> = LazyLock::new(|| {
+        let fields = [
+            Field::new("measurement_id", UInt32, false).into(),
+            Field::new("timestamp", Timestamp(Microsecond, None), false).into(),
+            Field::new("x_coordinate", Int32, false).into(),
+            Field::new("y_coordinate", Int32, false).into(),
+            Field::new("z_coordinate", Int32, false).into(),
+            Field::new("a_interfibre", Int32, false).into(),
+            Field::new("integration_duration", UInt32, false).into(),
+            Field::new("spectrometer_id", UInt32, false).into(),
+        ];
+        Schema::new(fields).into()
+    });
+}
 
 impl TryFrom<File> for MeasurementWriter {
     type Error = ArrowError;
@@ -77,20 +98,4 @@ impl TryFrom<&Path> for MeasurementWriter {
     fn try_from(path: &Path) -> Result<Self, Self::Error> {
         Self::new(path)
     }
-}
-
-impl Writer for MeasurementWriter {
-    const SCHEMA: LazyLock<Arc<Schema>> = LazyLock::new(|| {
-        let fields = [
-            Field::new("measurement_id", UInt32, false).into(),
-            Field::new("timestamp", Timestamp(Microsecond, None), false).into(),
-            Field::new("x_coordinate", Int32, false).into(),
-            Field::new("y_coordinate", Int32, false).into(),
-            Field::new("z_coordinate", Int32, false).into(),
-            Field::new("a_interfibre", Int32, false).into(),
-            Field::new("integration_duration", UInt32, false).into(),
-            Field::new("spectrometer_id", UInt32, false).into(),
-        ];
-        Schema::new(fields).into()
-    });
 }

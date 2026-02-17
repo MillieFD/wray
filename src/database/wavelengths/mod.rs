@@ -16,7 +16,6 @@ mod record;
 /* ----------------------------------------------------------------------------- Private Imports */
 
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Seek};
 use std::ops::Sub;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};

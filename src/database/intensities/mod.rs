@@ -15,7 +15,6 @@ mod accumulator;
 /* ----------------------------------------------------------------------------- Private Imports */
 
 use std::fs::File;
-use std::io::Write;
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
 
@@ -33,12 +32,12 @@ use crate::Error;
 /* ------------------------------------------------------------------------------ Public Exports */
 
 #[pyclass]
-pub(super) struct IntensityWriter {
+pub struct Intensities {
     writer: StreamWriter<File>,
     acc: Accumulator,
 }
 
-impl IntensityWriter {
+impl Intensities {
     pub(super) fn new<P>(path: P) -> Result<Self, Error>
     where
         P: AsRef<Path>,
@@ -50,7 +49,7 @@ impl IntensityWriter {
 }
 
 #[pymethods]
-impl IntensityWriter {
+impl Intensities {
     pub fn push(&mut self, measurement: u32, wavelengths: Vec<u32>, intensities: Vec<f64>) {
         self.acc.append(measurement, wavelengths, intensities);
     }
@@ -64,7 +63,7 @@ impl IntensityWriter {
 
 /* ----------------------------------------------------------------------- Trait Implementations */
 
-impl Writer for IntensityWriter {
+impl Writer for Intensities {
     const SCHEMA: LazyLock<Arc<Schema>> = LazyLock::new(|| {
         let fields = [
             Field::new("measurement", UInt32, false).into(),
@@ -75,7 +74,7 @@ impl Writer for IntensityWriter {
     });
 }
 
-impl TryFrom<File> for IntensityWriter {
+impl TryFrom<File> for Intensities {
     type Error = ArrowError;
 
     fn try_from(file: File) -> Result<Self, Self::Error> {
@@ -84,14 +83,14 @@ impl TryFrom<File> for IntensityWriter {
     }
 }
 
-impl From<StreamWriter<File>> for IntensityWriter {
+impl From<StreamWriter<File>> for Intensities {
     fn from(writer: StreamWriter<File>) -> Self {
         let acc = Accumulator::new();
         Self { writer, acc }
     }
 }
 
-impl TryFrom<&Path> for IntensityWriter {
+impl TryFrom<&Path> for Intensities {
     type Error = Error;
 
     fn try_from(path: &Path) -> Result<Self, Self::Error> {

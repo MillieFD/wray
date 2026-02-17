@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::SystemTime;
 
 use arrow::array::{
-    Array,
+    ArrayRef,
     DurationMicrosecondBuilder,
     Int32Builder,
     TimestampMillisecondBuilder,
@@ -54,7 +54,7 @@ impl Accumulator {
 
     pub fn append(&mut self, x: Length, y: Length, z: Length, a: Length, i: Time) -> u32 {
         // Calculate values
-        let timestamp: i64 = SystemTime::UNIX_EPOCH
+        let timestamp = SystemTime::UNIX_EPOCH
             .elapsed()
             .unwrap_or_default()
             .as_millis() as i64;
@@ -67,17 +67,19 @@ impl Accumulator {
         self.z.append_value(z.get::<micrometer>() as i32);
         self.a.append_value(a.get::<micrometer>() as u32);
         self.integration.append_value(i.get::<microsecond>() as i64);
+        // Return the measurement ID
+        id
     }
 
-    pub(super) fn columns(&mut self) -> Vec<Arc<dyn Array>> {
+    pub(super) fn columns(&mut self) -> Vec<Arc<ArrayRef>> {
         vec![
-            Arc::new(self.id.finish()),
-            Arc::new(self.timestamp.finish()),
-            Arc::new(self.x.finish()),
-            Arc::new(self.y.finish()),
-            Arc::new(self.z.finish()),
-            Arc::new(self.a.finish()),
-            Arc::new(self.integration.finish()),
+            self.id.finish().into(),
+            self.timestamp.finish().into(),
+            self.x.finish().into(),
+            self.y.finish().into(),
+            self.z.finish().into(),
+            self.a.finish().into(),
+            self.integration.finish().into(),
         ]
     }
 }

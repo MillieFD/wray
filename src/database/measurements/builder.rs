@@ -63,7 +63,7 @@ impl Accumulator {
                 batch
                     .column_by_name("id")
                     .expect("Unable to read 'id' column")
-                    .as_primitive::<UInt32Builder>()
+                    .as_primitive::<UInt32Type>()
                     .values()
             })
             .flatten()

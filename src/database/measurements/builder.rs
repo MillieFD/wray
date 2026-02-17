@@ -10,42 +10,59 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
+use std::fs::File;
+use std::path::Path;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::SystemTime;
 
 use arrow::array::{
     ArrayRef,
+    AsArray,
     DurationMicrosecondBuilder,
-    Int32Builder,
+    Float64Builder,
     TimestampMillisecondBuilder,
     UInt32Builder,
 };
+use arrow::datatypes::UInt32Type;
+use arrow::ipc::reader::StreamReader;
 use uom::si::f64::{Length, Time};
 use uom::si::length::micrometer;
 use uom::si::time::microsecond;
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
-pub(super) struct Accumulator {
+pub(super) struct Builder {
     next: AtomicU32,
     id: UInt32Builder,
     timestamp: TimestampMillisecondBuilder,
-    x: Int32Builder,
-    y: Int32Builder,
-    z: Int32Builder,
-    a: UInt32Builder,
+    #[cfg(feature = "x")]
+    x: Float64Builder,
+    #[cfg(feature = "y")]
+    y: Float64Builder,
+    #[cfg(feature = "z")]
+    z: Float64Builder,
+    #[cfg(feature = "a")]
+    a: Float64Builder,
     integration: DurationMicrosecondBuilder,
 }
 
-impl Accumulator {
-    pub(super) fn new() -> Self {
+impl Builder {
+    pub(super) fn new<P>(path: &P) -> Self
+    where
+        P: AsRef<Path> + ?Sized,
+    {
         Self {
-            next: Default::default(), // TODO: next read from existing or 0,
+            next: Self::read(path),
             id: Default::default(),
             timestamp: Default::default(),
+            #[cfg(feature = "x")]
             x: Default::default(),
+            #[cfg(feature = "y")]
             y: Default::default(),
+            #[cfg(feature = "z")]
             z: Default::default(),
+            #[cfg(feature = "a")]
             a: Default::default(),
             integration: Default::default(),
         }
@@ -73,34 +90,31 @@ impl Accumulator {
             .into()
     }
 
-    pub fn append(&mut self, x: Length, y: Length, z: Length, a: Length, i: Time) -> u32 {
-        // Calculate values
+    pub fn push(&mut self, x: Length, y: Length, z: Length, a: Length, i: Time) -> u32 {
         let timestamp = SystemTime::UNIX_EPOCH
             .elapsed()
             .unwrap_or_default()
             .as_millis() as i64;
         let id: u32 = self.next.fetch_add(1, Ordering::Relaxed);
-        // Append values to IPC Array Builders
         self.id.append_value(id);
         self.timestamp.append_value(timestamp);
-        self.x.append_value(x.get::<micrometer>() as i32);
-        self.y.append_value(y.get::<micrometer>() as i32);
-        self.z.append_value(z.get::<micrometer>() as i32);
-        self.a.append_value(a.get::<micrometer>() as u32);
+        self.x.append_value(x.get::<micrometer>());
+        self.y.append_value(y.get::<micrometer>());
+        self.z.append_value(z.get::<micrometer>());
+        self.a.append_value(a.get::<micrometer>());
         self.integration.append_value(i.get::<microsecond>() as i64);
-        // Return the measurement ID
-        id
+        id // Return the inserted measurement ID
     }
 
     pub(super) fn columns(&mut self) -> Vec<ArrayRef> {
         vec![
-            self.id.finish().into(),
-            self.timestamp.finish().into(),
-            self.x.finish().into(),
-            self.y.finish().into(),
-            self.z.finish().into(),
-            self.a.finish().into(),
-            self.integration.finish().into(),
+            Arc::new(self.id.finish()),
+            Arc::new(self.timestamp.finish()),
+            Arc::new(self.x.finish()),
+            Arc::new(self.y.finish()),
+            Arc::new(self.z.finish()),
+            Arc::new(self.a.finish()),
+            Arc::new(self.integration.finish()),
         ]
     }
 }

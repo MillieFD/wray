@@ -18,12 +18,12 @@ use std::fs::File;
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
 
+use arrow::array::RecordBatch;
 use arrow::datatypes::DataType::{Int32, Timestamp, UInt32};
 use arrow::datatypes::TimeUnit::Microsecond;
 use arrow::datatypes::{Field, Schema};
 use arrow::error::ArrowError;
 use arrow::ipc::writer::StreamWriter;
-use arrow::record_batch::RecordBatch;
 use uom::si::f64::{Length, Time};
 
 use self::accumulator::*;
@@ -51,10 +51,10 @@ impl MeasurementWriter {
         self.acc.append(x, y, z, a, i)
     }
 
-    pub fn commit(&mut self) {
+    pub fn commit(&mut self) -> Result<(), ArrowError> {
         let columns = self.acc.columns();
-        let batch = RecordBatch::try_new(Self::schema(), columns).unwrap();
-        self.writer.write(&batch).expect("Failed to write batch");
+        let batch = RecordBatch::try_new(Self::schema(), columns)?;
+        self.writer.write(&batch)
     }
 }
 

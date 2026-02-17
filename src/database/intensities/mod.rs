@@ -54,6 +54,17 @@ impl IntensityWriter {
 
 /* ----------------------------------------------------------------------- Trait Implementations */
 
+impl Writer for IntensityWriter {
+    const SCHEMA: LazyLock<Arc<Schema>> = LazyLock::new(|| {
+        let fields = [
+            Field::new("measurement", UInt32, false).into(),
+            Field::new("wavelength", UInt32, false).into(),
+            Field::new("intensity", Float64, false).into(),
+        ];
+        Schema::new(fields).into()
+    });
+}
+
 impl TryFrom<File> for IntensityWriter {
     type Error = ArrowError;
 

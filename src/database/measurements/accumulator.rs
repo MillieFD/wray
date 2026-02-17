@@ -10,7 +10,6 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::SystemTime;
 

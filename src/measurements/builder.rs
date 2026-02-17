@@ -90,7 +90,7 @@ impl Builder {
             .into()
     }
 
-    pub fn push(&mut self, x: Length, y: Length, z: Length, a: Length, i: Time) -> u32 {
+    pub fn append(&mut self, x: Length, y: Length, z: Length, a: Length, i: Time) -> u32 {
         let timestamp = SystemTime::UNIX_EPOCH
             .elapsed()
             .unwrap_or_default()

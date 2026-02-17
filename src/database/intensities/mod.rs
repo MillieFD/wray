@@ -15,21 +15,24 @@ mod accumulator;
 /* ----------------------------------------------------------------------------- Private Imports */
 
 use std::fs::File;
+use std::io::Write;
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
 
-use accumulator::*;
 use arrow::array::RecordBatch;
-use arrow::datatypes::DataType::UInt32;
+use arrow::datatypes::DataType::{Float64, UInt32};
 use arrow::datatypes::{Field, Schema};
 use arrow::error::ArrowError;
 use arrow::ipc::writer::StreamWriter;
+use pyo3::prelude::*;
 
+use self::accumulator::*;
 use super::Writer;
 use crate::Error;
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
+#[pyclass]
 pub(super) struct IntensityWriter {
     writer: StreamWriter<File>,
     acc: Accumulator,
@@ -44,11 +47,18 @@ impl IntensityWriter {
         let writer = File::create(path)?.try_into()?;
         Ok(writer)
     }
+}
 
-    pub fn commit(&mut self) {
+#[pymethods]
+impl IntensityWriter {
+    pub fn push(&mut self, measurement: u32, wavelengths: Vec<u32>, intensities: Vec<f64>) {
+        self.acc.append(measurement, wavelengths, intensities);
+    }
+
+    pub fn commit(&mut self) -> Result<(), Error> {
         let columns = self.acc.columns();
-        let batch = RecordBatch::try_new(Self::schema(), columns).unwrap();
-        self.writer.write(&batch).expect("Failed to write batch");
+        let batch = RecordBatch::try_new(Self::schema(), columns)?;
+        self.writer.write(&batch).map_err(Error::from)
     }
 }
 
@@ -87,11 +97,4 @@ impl TryFrom<&Path> for IntensityWriter {
     fn try_from(path: &Path) -> Result<Self, Self::Error> {
         Self::new(path)
     }
-}
-
-impl Writer for IntensityWriter {
-    const SCHEMA: LazyLock<Arc<Schema>> = LazyLock::new(|| {
-        let fields = [Field::new("measurement_id", UInt32, false).into()];
-        Schema::new(fields).into()
-    });
 }

@@ -58,8 +58,6 @@ impl Database {
 
 #[cfg(test)]
 mod tests {
-    use arrow::ipc::reader::StreamReader;
-
     use super::*;
     #[test]
     fn database_creation() {

@@ -70,7 +70,6 @@ impl Writer for MeasurementWriter {
             Field::new("z_coordinate", Int32, false).into(),
             Field::new("a_interfibre", Int32, false).into(),
             Field::new("integration_duration", UInt32, false).into(),
-            Field::new("spectrometer_id", UInt32, false).into(),
         ];
         Schema::new(fields).into()
     });

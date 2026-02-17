@@ -68,6 +68,7 @@ impl Accumulator {
             })
             .flatten()
             .last()
+            .map(|id| id + 1)
             .unwrap_or_default()
     }
 

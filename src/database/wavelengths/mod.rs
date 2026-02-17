@@ -119,11 +119,10 @@ impl WavelengthWriter {
         Ok(ids)
     }
 
-    pub fn commit(&mut self) {
+    pub fn commit(&mut self) -> Result<(), ArrowError> {
         let columns = self.acc.columns();
-        let batch = RecordBatch::try_new(Self::schema(), columns).unwrap();
-        self.writer.write(&batch).expect("Failed to write batch");
-        // TODO: Handle errors gracefully
+        let batch = RecordBatch::try_new(Self::schema(), columns)?;
+        self.writer.write(&batch)
     }
 }
 

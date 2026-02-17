@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock};
 
-use arrow::array::{Array, AsArray, Datum, RecordBatch};
+use arrow::array::{AsArray, RecordBatch};
 use arrow::datatypes::DataType::{Float64, UInt32};
 use arrow::datatypes::{Field, Float64Type, Schema, UInt32Type};
 use arrow::error::ArrowError;

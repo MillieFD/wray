@@ -51,7 +51,7 @@ impl Accumulator {
         }
     }
 
-    pub fn read<P>(path: &P) -> u32
+    pub fn read<P>(path: &P) -> AtomicU32
     where
         P: AsRef<Path> + ?Sized,
     {

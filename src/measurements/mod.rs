@@ -47,7 +47,7 @@ impl Measurements {
     }
 
     pub fn push(&mut self, x: Length, y: Length, z: Length, a: Length, i: Time) -> u32 {
-        self.builder.push(x, y, z, a, i)
+        self.builder.append(x, y, z, a, i)
     }
 
     pub fn commit(&mut self) -> Result<(), Error> {

@@ -51,6 +51,27 @@ impl Accumulator {
         }
     }
 
+    pub fn read<P>(path: &P) -> u32
+    where
+        P: AsRef<Path> + ?Sized,
+    {
+        let file = File::open(path).expect("Unable to open 'measurements' file");
+        StreamReader::try_new(file, None)
+            .expect("Unable to read 'measurements' file")
+            .filter_map(Result::ok)
+            .map(|batch| {
+                batch
+                    .column_by_name("id")
+                    .expect("Unable to read 'id' column")
+                    .as_primitive::<UInt32Builder>()
+                    .values()
+            })
+            .flatten()
+            .last()
+            .unwrap_or_default()
+            + 1
+    }
+
     pub fn append(&mut self, x: Length, y: Length, z: Length, a: Length, i: Time) -> u32 {
         // Calculate values
         let timestamp = SystemTime::UNIX_EPOCH

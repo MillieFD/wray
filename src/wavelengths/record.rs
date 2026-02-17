@@ -23,7 +23,7 @@ pub(super) struct Record {
 }
 
 impl Record {
-    pub fn new(id: u32, nm: Length) -> Self {
+    pub(super) fn new(id: u32, nm: Length) -> Self {
         Self { id, nm }
     }
 }

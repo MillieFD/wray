@@ -71,7 +71,7 @@ impl Accumulator {
         id
     }
 
-    pub(super) fn columns(&mut self) -> Vec<Arc<ArrayRef>> {
+    pub(super) fn columns(&mut self) -> Vec<ArrayRef> {
         vec![
             self.id.finish().into(),
             self.timestamp.finish().into(),

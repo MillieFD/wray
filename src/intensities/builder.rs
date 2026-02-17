@@ -16,13 +16,13 @@ use arrow::array::{ArrayRef, Float64Builder, UInt32Builder};
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
-pub(super) struct Accumulator {
+pub(super) struct Builder {
     measurement: UInt32Builder,
     wavelength: UInt32Builder,
     intensity: Float64Builder,
 }
 
-impl Accumulator {
+impl Builder {
     pub(super) fn new() -> Self {
         Self {
             measurement: Default::default(),
@@ -31,7 +31,12 @@ impl Accumulator {
         }
     }
 
-    pub fn append(&mut self, measurement: u32, wavelengths: Vec<u32>, intensities: Vec<f64>) {
+    pub(super) fn append(
+        &mut self,
+        measurement: u32,
+        wavelengths: Vec<u32>,
+        intensities: Vec<f64>,
+    ) {
         wavelengths.into_iter().zip(intensities).for_each(|(λ, i)| {
             self.measurement.append_value(measurement);
             self.wavelength.append_value(λ);

@@ -63,7 +63,7 @@ impl MeasurementWriter {
 impl Writer for MeasurementWriter {
     const SCHEMA: LazyLock<Arc<Schema>> = LazyLock::new(|| {
         let fields = [
-            Field::new("measurement_id", UInt32, false).into(),
+            Field::new("id", UInt32, false).into(),
             Field::new("timestamp", Timestamp(Microsecond, None), false).into(),
             Field::new("x_coordinate", Int32, false).into(),
             Field::new("y_coordinate", Int32, false).into(),

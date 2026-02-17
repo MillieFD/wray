@@ -10,7 +10,7 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 /* ----------------------------------------------------------------------------- Private Modules */
 
-mod accumulator;
+mod builder;
 mod record;
 
 /* ----------------------------------------------------------------------------- Private Imports */
@@ -24,44 +24,32 @@ use std::sync::{Arc, LazyLock};
 use arrow::array::{AsArray, RecordBatch};
 use arrow::datatypes::DataType::{Float64, UInt32};
 use arrow::datatypes::{Field, Float64Type, Schema, UInt32Type};
-use arrow::error::ArrowError;
 use arrow::ipc::reader::StreamReader;
 use arrow::ipc::writer::StreamWriter;
-use pyo3::prelude::*;
 use uom::si::f64::Length;
 use uom::si::length::nanometer;
 
-use self::accumulator::*;
-use self::record::*;
-use super::Writer;
-use crate::Error;
+use self::builder::Builder;
+use self::record::Record;
+use crate::{Error, Writer};
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
-pub(super) struct WavelengthWriter {
-    writer: StreamWriter<File>,
-    acc: Accumulator,
+pub struct Wavelengths {
+    stream: StreamWriter<File>,
+    builder: Builder,
     path: PathBuf,
 }
 
-impl WavelengthWriter {
+impl Wavelengths {
     pub(super) fn new<P>(path: P) -> Result<Self, Error>
     where
         P: AsRef<Path>,
     {
-        let path = path.as_ref().join("wavelengths").with_extension("arrow");
-        let file = OpenOptions::new()
-            .write(true)
-            .read(true)
-            .create(true)
-            .truncate(true)
-            .open(&path)?;
-        let writer = Self {
-            writer: StreamWriter::try_new(file, &Self::SCHEMA)?,
-            acc: Accumulator::new(),
-            path: path.to_path_buf(),
-        };
-        Ok(writer)
+        path.as_ref()
+            .join("wavelengths")
+            .with_extension("arrow")
+            .try_into()
     }
 
     fn read(&self) -> Vec<Record> {
@@ -92,7 +80,7 @@ impl WavelengthWriter {
             })
     }
 
-    pub(super) fn push(&mut self, wavelengths: Vec<f64>) -> Result<Vec<u32>, ArrowError> {
+    pub fn push(&mut self, wavelengths: Vec<f64>) -> Result<Vec<u32>, Error> {
         const TOLERANCE: f64 = 1E-12;
         let mut records = self.read();
         records.sort_unstable(); // In-place sort does not allocate
@@ -100,7 +88,7 @@ impl WavelengthWriter {
         let ids = wavelengths
             .iter()
             .map(|wl| Length::new::<nanometer>(*wl))
-            .scan(records.iter(), |mut iter, wl| {
+            .scan(records.iter(), |iter, wl| {
                 loop {
                     match iter.next() {
                         Some(record) if record.nm.sub(wl).abs().value < TOLERANCE => {
@@ -109,7 +97,7 @@ impl WavelengthWriter {
                         Some(record) if record.nm.sub(wl).value > TOLERANCE => continue,
                         _ => {
                             let id = next.fetch_add(1, Ordering::Relaxed);
-                            self.acc.push(id, wl);
+                            self.builder.append(id, wl);
                             break Some(id);
                         }
                     }
@@ -119,16 +107,16 @@ impl WavelengthWriter {
         Ok(ids)
     }
 
-    pub fn commit(&mut self) -> Result<(), ArrowError> {
-        let columns = self.acc.columns();
+    pub fn commit(&mut self) -> Result<(), Error> {
+        let columns = self.builder.columns();
         let batch = RecordBatch::try_new(Self::schema(), columns)?;
-        self.writer.write(&batch)
+        self.stream.write(&batch).map_err(Error::from)
     }
 }
 
 /* ----------------------------------------------------------------------- Trait Implementations */
 
-impl Writer for WavelengthWriter {
+impl Writer for Wavelengths {
     const SCHEMA: LazyLock<Arc<Schema>> = LazyLock::new(|| {
         let fields = [
             Field::new("id", UInt32, false).into(),
@@ -138,10 +126,23 @@ impl Writer for WavelengthWriter {
     });
 }
 
-impl TryFrom<&Path> for WavelengthWriter {
+impl TryFrom<PathBuf> for Wavelengths {
     type Error = Error;
 
-    fn try_from(path: &Path) -> Result<Self, Self::Error> {
-        Self::new(path)
+    fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
+        let stream = OpenOptions::new()
+            .read(false)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&path)?
+            .into();
+        let builder = Builder::new();
+        let table = Self {
+            stream,
+            builder,
+            path,
+        };
+        Ok(table)
     }
 }

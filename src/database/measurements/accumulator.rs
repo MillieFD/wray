@@ -52,7 +52,7 @@ impl Accumulator {
         }
     }
 
-    pub fn append(&mut self, x: Length, y: Length, z: Length, a: Length, i: Time) {
+    pub fn append(&mut self, x: Length, y: Length, z: Length, a: Length, i: Time) -> u32 {
         // Calculate values
         let timestamp: i64 = SystemTime::UNIX_EPOCH
             .elapsed()

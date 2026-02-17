@@ -10,31 +10,27 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 /* ----------------------------------------------------------------------------- Private Modules */
 
-mod accumulator;
+mod builder;
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
-use std::fs::File;
-use std::path::Path;
+use std::fs::{File, OpenOptions};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
 use arrow::array::RecordBatch;
 use arrow::datatypes::DataType::{Float64, UInt32};
 use arrow::datatypes::{Field, Schema};
-use arrow::error::ArrowError;
 use arrow::ipc::writer::StreamWriter;
-use pyo3::prelude::*;
 
-use self::accumulator::*;
-use super::Writer;
-use crate::Error;
+use self::builder::Builder;
+use crate::{Error, Writer};
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
-#[pyclass]
 pub struct Intensities {
-    writer: StreamWriter<File>,
-    acc: Accumulator,
+    stream: StreamWriter<File>,
+    builder: Builder,
 }
 
 impl Intensities {
@@ -42,22 +38,20 @@ impl Intensities {
     where
         P: AsRef<Path>,
     {
-        let path = path.as_ref().join("intensities").with_extension("arrow");
-        let writer = File::create(path)?.try_into()?;
-        Ok(writer)
+        path.as_ref()
+            .join("intensities")
+            .with_extension("arrow")
+            .try_into()
     }
-}
 
-#[pymethods]
-impl Intensities {
     pub fn push(&mut self, measurement: u32, wavelengths: Vec<u32>, intensities: Vec<f64>) {
-        self.acc.append(measurement, wavelengths, intensities);
+        self.builder.append(measurement, wavelengths, intensities);
     }
 
     pub fn commit(&mut self) -> Result<(), Error> {
-        let columns = self.acc.columns();
-        let batch = RecordBatch::try_new(Self::schema(), columns)?;
-        self.writer.write(&batch).map_err(Error::from)
+        let columns = self.builder.columns();
+        let batch = RecordBatch::try_new(*Self::SCHEMA, columns)?;
+        self.stream.write(&batch).map_err(Error::from)
     }
 }
 
@@ -74,26 +68,19 @@ impl Writer for Intensities {
     });
 }
 
-impl TryFrom<File> for Intensities {
-    type Error = ArrowError;
-
-    fn try_from(file: File) -> Result<Self, Self::Error> {
-        let writer = StreamWriter::try_new(file, &Self::SCHEMA)?.into();
-        Ok(writer)
-    }
-}
-
-impl From<StreamWriter<File>> for Intensities {
-    fn from(writer: StreamWriter<File>) -> Self {
-        let acc = Accumulator::new();
-        Self { writer, acc }
-    }
-}
-
-impl TryFrom<&Path> for Intensities {
+impl TryFrom<PathBuf> for Intensities {
     type Error = Error;
 
-    fn try_from(path: &Path) -> Result<Self, Self::Error> {
-        Self::new(path)
+    fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
+        let stream = OpenOptions::new()
+            .read(false)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&path)?
+            .into();
+        let builder = Builder::new();
+        let table = Self { stream, builder };
+        Ok(table)
     }
 }

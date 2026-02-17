@@ -2,7 +2,7 @@
 edition = "2024"
 unstable_features = true
 
-# Start tidy alphabetical list
+# Start Alphabetical List
 comment_width = 100
 condense_wildcard_suffixes = true
 format_code_in_doc_comments = true
@@ -16,4 +16,4 @@ normalize_doc_attributes = true
 reorder_impl_items = true
 style_edition = "2024"
 wrap_comments = true
-# End tidy alphabetical list
+# End Alphabetical List

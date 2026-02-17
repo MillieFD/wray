@@ -52,11 +52,6 @@ impl Database {
         };
         Ok(db)
     }
-
-    pub fn push_wavelengths(&mut self, wavelengths: Vec<f64>) -> Result<Vec<u32>, Error> {
-        println!("Pushing wavelengths");
-        self.wavelengths.push(&wavelengths[..]).map_err(Error::from)
-    }
 }
 
 /* ---------------------------------------------------------------------------------- Unit Tests */

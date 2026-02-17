@@ -47,7 +47,7 @@ impl MeasurementWriter {
         Ok(writer)
     }
 
-    pub fn push(&mut self, x: Length, y: Length, z: Length, a: Length, i: Time) {
+    pub fn push(&mut self, x: Length, y: Length, z: Length, a: Length, i: Time) -> u32 {
         self.acc.append(x, y, z, a, i)
     }
 

@@ -82,7 +82,7 @@ impl TryFrom<PathBuf> for Measurements {
     type Error = Error;
 
     fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
-        let stream: StreamWriter<File> = OpenOptions::new()
+        let stream = OpenOptions::new()
             .read(false)
             .write(true)
             .create(true)

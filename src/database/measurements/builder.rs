@@ -70,6 +70,7 @@ impl Accumulator {
             .last()
             .map(|id| id + 1)
             .unwrap_or_default()
+            .into()
     }
 
     pub fn append(&mut self, x: Length, y: Length, z: Length, a: Length, i: Time) -> u32 {

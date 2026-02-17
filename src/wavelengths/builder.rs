@@ -18,12 +18,12 @@ use uom::si::length::nanometer;
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
-pub(super) struct Accumulator {
+pub(super) struct Builder {
     id: UInt32Builder,
     nm: Float64Builder,
 }
 
-impl Accumulator {
+impl Builder {
     pub(super) fn new() -> Self {
         Self {
             id: Default::default(),
@@ -31,7 +31,7 @@ impl Accumulator {
         }
     }
 
-    pub fn push(&mut self, id: u32, wavelength: Length) {
+    pub(super) fn append(&mut self, id: u32, wavelength: Length) {
         self.id.append_value(id);
         self.nm.append_value(wavelength.get::<nanometer>());
     }

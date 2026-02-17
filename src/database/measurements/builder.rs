@@ -69,7 +69,6 @@ impl Accumulator {
             .flatten()
             .last()
             .unwrap_or_default()
-            + 1
     }
 
     pub fn append(&mut self, x: Length, y: Length, z: Length, a: Length, i: Time) -> u32 {

@@ -18,4 +18,7 @@ use arrow::datatypes::Schema;
 
 pub(super) trait Writer {
     const SCHEMA: LazyLock<Arc<Schema>>;
+    fn schema() -> Arc<Schema> {
+        Self::SCHEMA.clone() // Inexpensive Arc Clone
+    }
 }

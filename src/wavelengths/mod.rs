@@ -36,9 +36,9 @@ use crate::{Error, Writer};
 /* ------------------------------------------------------------------------------ Public Exports */
 
 pub struct Wavelengths {
-    stream: StreamWriter<File>,
-    builder: Builder,
-    path: PathBuf,
+    pub stream: StreamWriter<File>,
+    pub builder: Builder,
+    pub path: PathBuf,
 }
 
 impl Wavelengths {

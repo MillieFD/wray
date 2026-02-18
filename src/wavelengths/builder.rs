@@ -18,7 +18,7 @@ use uom::si::length::nanometer;
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
-pub(super) struct Builder {
+pub struct Builder {
     id: UInt32Builder,
     nm: Float64Builder,
 }

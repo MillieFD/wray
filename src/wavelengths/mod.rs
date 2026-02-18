@@ -130,19 +130,16 @@ impl TryFrom<PathBuf> for Wavelengths {
     type Error = Error;
 
     fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
-        let stream = OpenOptions::new()
+        let file = OpenOptions::new()
             .read(false)
             .write(true)
             .create(true)
             .truncate(false)
-            .open(&path)?
-            .into();
-        let builder = Builder::new();
-        let table = Self {
-            stream,
-            builder,
+            .open(&path)?;
+        Ok(Self {
+            stream: StreamWriter::try_new(file, &Self::SCHEMA)?,
+            builder: Builder::new(),
             path,
-        };
-        Ok(table)
+        })
     }
 }

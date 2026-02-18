@@ -52,7 +52,7 @@ impl Measurements {
 
     pub fn commit(&mut self) -> Result<(), Error> {
         let columns = self.builder.columns();
-        let batch = RecordBatch::try_new(*Self::SCHEMA, columns)?;
+        let batch = RecordBatch::try_new(Self::schema(), columns)?;
         self.stream.write(&batch).map_err(Error::from)
     }
 }
@@ -82,15 +82,15 @@ impl TryFrom<PathBuf> for Measurements {
     type Error = Error;
 
     fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
-        let stream = OpenOptions::new()
+        let file = OpenOptions::new()
             .read(false)
             .write(true)
             .create(true)
             .truncate(false)
-            .open(&path)?
-            .into();
+            .open(&path)?;
+        let stream = StreamWriter::try_new(file, &Self::SCHEMA)?;
         let builder = Builder::new(&path);
-        let table = Self { stream, builder };
-        Ok(table)
+        let db = Self { stream, builder };
+        Ok(db)
     }
 }

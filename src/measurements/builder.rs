@@ -76,18 +76,21 @@ impl Builder {
         StreamReader::try_new(file, None)
             .expect("Unable to read 'measurements' file")
             .filter_map(Result::ok)
-            .map(|batch| {
+            .fold(Vec::new(), |mut ids, batch| {
                 batch
                     .column_by_name("id")
                     .expect("Unable to read 'id' column")
                     .as_primitive::<UInt32Type>()
                     .values()
+                    .iter()
+                    .copied()
+                    .collect_into(&mut ids)
+                    .to_owned()
             })
-            .flatten()
-            .last()
-            .map(|id| id + 1)
+            .into_iter()
+            .max()
+            .map(AtomicU32::from)
             .unwrap_or_default()
-            .into()
     }
 
     pub fn append(&mut self, x: Length, y: Length, z: Length, a: Length, i: Time) -> u32 {
@@ -98,9 +101,13 @@ impl Builder {
         let id: u32 = self.next.fetch_add(1, Ordering::Relaxed);
         self.id.append_value(id);
         self.timestamp.append_value(timestamp);
+        #[cfg(feature = "x")]
         self.x.append_value(x.get::<micrometer>());
+        #[cfg(feature = "y")]
         self.y.append_value(y.get::<micrometer>());
+        #[cfg(feature = "z")]
         self.z.append_value(z.get::<micrometer>());
+        #[cfg(feature = "a")]
         self.a.append_value(a.get::<micrometer>());
         self.integration.append_value(i.get::<microsecond>() as i64);
         id // Return the inserted measurement ID
@@ -110,9 +117,13 @@ impl Builder {
         vec![
             Arc::new(self.id.finish()),
             Arc::new(self.timestamp.finish()),
+            #[cfg(feature = "x")]
             Arc::new(self.x.finish()),
+            #[cfg(feature = "y")]
             Arc::new(self.y.finish()),
+            #[cfg(feature = "z")]
             Arc::new(self.z.finish()),
+            #[cfg(feature = "a")]
             Arc::new(self.a.finish()),
             Arc::new(self.integration.finish()),
         ]

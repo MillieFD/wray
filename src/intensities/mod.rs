@@ -72,15 +72,23 @@ impl TryFrom<PathBuf> for Intensities {
     type Error = Error;
 
     fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
-        let stream = OpenOptions::new()
+        OpenOptions::new()
             .read(false)
             .write(true)
             .create(true)
             .truncate(false)
             .open(&path)?
-            .into();
-        let builder = Builder::new();
-        let table = Self { stream, builder };
-        Ok(table)
+            .try_into()
+    }
+}
+
+impl TryFrom<File> for Intensities {
+    type Error = Error;
+
+    fn try_from(file: File) -> Result<Self, Self::Error> {
+        Ok(Self {
+            stream: StreamWriter::try_new(file, &Self::SCHEMA)?,
+            builder: Builder::new(),
+        })
     }
 }

@@ -59,7 +59,7 @@ mod tests {
     #[test]
     fn database_creation() {
         const PATH: &str = "test-creation";
-        let mut db = Database::new(PATH).unwrap();
+        let db = Database::new(PATH).unwrap();
         assert!(db.path.exists());
         remove_dir_all(PATH).unwrap();
     }

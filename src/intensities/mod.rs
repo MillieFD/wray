@@ -50,7 +50,7 @@ impl Intensities {
 
     pub fn commit(&mut self) -> Result<(), Error> {
         let columns = self.builder.columns();
-        let batch = RecordBatch::try_new(*Self::SCHEMA, columns)?;
+        let batch = RecordBatch::try_new(Self::schema(), columns)?;
         self.stream.write(&batch).map_err(Error::from)
     }
 }

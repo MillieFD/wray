@@ -11,14 +11,23 @@ repository = "https://github.com/MillieFD/optic"
 
 # See a full list of keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lib]
+name = "optic"
+crate-type = ["lib"]
+
+[features]
+default = ["x", "y"]
+x = []
+y = []
+z = []
+a = []
+
 [dependencies.arrow]
 version = "57.3"
-
-[dependencies.pyo3]
-version = "0.28"
-features = ["extension-module"]
+default-features = false
+features = ["ipc_compression"]
 
 [dependencies.uom]
-version = "0.37"
+version = "0.38"
 default-features = false
-features = ["si", "i32", "u32"]
+features = ["si", "f64"]

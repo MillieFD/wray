@@ -8,11 +8,40 @@ Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the conditions of the LICENSE are met.
 */
 
-/* ----------------------------------------------------------------------------- Private Modules */
+#![feature(iter_collect_into)]
 
-mod database;
 mod error;
+mod intensities;
+mod measurements;
+mod wavelengths;
+mod writer;
 
-/* ------------------------------------------------------------------------------ Public Exports */
+use std::fs::DirBuilder;
+use std::path::PathBuf;
 
-pub use error::Error;
+pub use self::error::Error;
+use self::intensities::Intensities;
+use self::measurements::Measurements;
+use self::wavelengths::Wavelengths;
+use self::writer::Writer;
+
+pub struct Database {
+    pub path: PathBuf,
+    pub wavelengths: Wavelengths,
+    pub measurements: Measurements,
+    pub intensities: Intensities,
+}
+
+impl Database {
+    pub fn new(filepath: &str) -> Result<Database, Error> {
+        DirBuilder::new().recursive(true).create(&filepath)?;
+        let path = PathBuf::from(filepath).canonicalize()?;
+        let db = Database {
+            wavelengths: Wavelengths::new(&path)?,
+            measurements: Measurements::new(&path)?,
+            intensities: Intensities::new(&path)?,
+            path,
+        };
+        Ok(db)
+    }
+}

@@ -46,8 +46,25 @@ impl Measurements {
             .try_into()
     }
 
-    pub fn push(&mut self, x: Length, y: Length, z: Length, a: Length, i: Time) -> u32 {
-        self.builder.append(x, y, z, a, i)
+    pub fn push(
+        &mut self,
+        #[cfg(feature = "x")] x: Length,
+        #[cfg(feature = "y")] y: Length,
+        #[cfg(feature = "z")] z: Length,
+        #[cfg(feature = "a")] a: Length,
+        i: Time,
+    ) -> u32 {
+        self.builder.append(
+            #[cfg(feature = "x")]
+            x,
+            #[cfg(feature = "y")]
+            y,
+            #[cfg(feature = "z")]
+            z,
+            #[cfg(feature = "a")]
+            a,
+            i,
+        )
     }
 
     pub fn commit(&mut self) -> Result<(), Error> {

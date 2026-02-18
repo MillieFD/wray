@@ -93,7 +93,14 @@ impl Builder {
             .unwrap_or_default()
     }
 
-    pub fn append(&mut self, x: Length, y: Length, z: Length, a: Length, i: Time) -> u32 {
+    pub fn append(
+        &mut self,
+        #[cfg(feature = "x")] x: Length,
+        #[cfg(feature = "y")] y: Length,
+        #[cfg(feature = "z")] z: Length,
+        #[cfg(feature = "a")] a: Length,
+        i: Time,
+    ) -> u32 {
         let timestamp = SystemTime::UNIX_EPOCH
             .elapsed()
             .unwrap_or_default()

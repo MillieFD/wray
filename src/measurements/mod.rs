@@ -18,7 +18,7 @@ use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
-use arrow::array::{AsArray, RecordBatch};
+use arrow::array::RecordBatch;
 use arrow::datatypes::DataType::{Int32, Timestamp, UInt32};
 use arrow::datatypes::TimeUnit::Microsecond;
 use arrow::datatypes::{Field, Schema};

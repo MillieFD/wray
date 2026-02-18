@@ -45,3 +45,59 @@ impl Database {
         Ok(db)
     }
 }
+
+/* ---------------------------------------------------------------------------------- Unit Tests */
+
+#[cfg(test)]
+mod tests {
+    use std::fs::{File, remove_dir_all};
+
+    use arrow::ipc::reader::StreamReader;
+    use arrow::ipc::writer::FileWriter;
+
+    use super::*;
+    #[test]
+    fn database_creation() {
+        const PATH: &str = "test-creation";
+        let mut db = Database::new(PATH).unwrap();
+        assert!(db.path.exists());
+        remove_dir_all(PATH).unwrap();
+    }
+
+    #[test]
+    fn wavelengths_schema() {
+        const PATH: &str = "test-wavelengths-schema";
+        let db = Database::new(PATH).unwrap();
+        let file = File::open(db.wavelengths.path).unwrap();
+        let reader = StreamReader::try_new(file, None).unwrap();
+        let schema = reader.schema();
+        assert_eq!(schema.fields().len(), 2);
+        remove_dir_all(PATH).unwrap();
+    }
+
+    #[test]
+    fn push_wavelengths() {
+        const PATH: &str = "test-push-wavelengths";
+        let mut db = Database::new(PATH).unwrap();
+        let ids = db.wavelengths.push(vec![1E-9, 1E-3, 1E3, 1E9]).unwrap();
+        assert_eq!(ids, vec![0, 1, 2, 3]);
+        remove_dir_all(PATH).unwrap();
+    }
+
+    #[test]
+    fn finalise() {
+        const PATH: &str = "test-finalise";
+        let db = Database::new(PATH).unwrap();
+        let input = File::open(db.wavelengths.path).unwrap();
+        let reader = StreamReader::try_new(input, None).unwrap();
+        let schema = reader.schema();
+        let output = File::create(db.path.join("wavelengths-finalised.arrow")).unwrap();
+        let mut writer = FileWriter::try_new(output, &schema).unwrap();
+        reader
+            .into_iter()
+            .filter_map(Result::ok)
+            .for_each(|batch| writer.write(&batch).unwrap());
+        writer.finish().unwrap(); // Write the file footer
+        remove_dir_all(PATH).unwrap();
+    }
+}

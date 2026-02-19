@@ -21,7 +21,7 @@ use arrow::array::{
     AsArray,
     DurationMicrosecondBuilder,
     Float64Builder,
-    TimestampMillisecondBuilder,
+    TimestampMicrosecondBuilder,
     UInt32Builder,
 };
 use arrow::datatypes::UInt32Type;
@@ -35,7 +35,7 @@ use uom::si::time::microsecond;
 pub(super) struct Builder {
     next: AtomicU32,
     id: UInt32Builder,
-    timestamp: TimestampMillisecondBuilder,
+    timestamp: TimestampMicrosecondBuilder,
     #[cfg(feature = "x")]
     x: Float64Builder,
     #[cfg(feature = "y")]

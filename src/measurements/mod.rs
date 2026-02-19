@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
 use arrow::array::RecordBatch;
-use arrow::datatypes::DataType::{Int32, Timestamp, UInt32};
+use arrow::datatypes::DataType::{Duration, Float64, Timestamp, UInt32};
 use arrow::datatypes::TimeUnit::Microsecond;
 use arrow::datatypes::{Field, Schema};
 use arrow::ipc::writer::StreamWriter;
@@ -82,14 +82,14 @@ impl Writer for Measurements {
             Field::new("id", UInt32, false).into(),
             Field::new("timestamp", Timestamp(Microsecond, None), false).into(),
             #[cfg(feature = "x")]
-            Field::new("x", Int32, false).into(),
+            Field::new("x", Float64, false).into(),
             #[cfg(feature = "y")]
-            Field::new("y", Int32, false).into(),
+            Field::new("y", Float64, false).into(),
             #[cfg(feature = "z")]
-            Field::new("z", Int32, false).into(),
+            Field::new("z", Float64, false).into(),
             #[cfg(feature = "a")]
-            Field::new("a", Int32, false).into(),
-            Field::new("integration", UInt32, false).into(),
+            Field::new("a", Float64, false).into(),
+            Field::new("integration", Duration(Microsecond), false).into(),
         ];
         Schema::new(fields).into()
     });

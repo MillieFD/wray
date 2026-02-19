@@ -31,17 +31,16 @@ impl Builder {
         }
     }
 
-    pub(super) fn append(
-        &mut self,
-        measurement: u32,
-        wavelengths: Vec<u32>,
-        intensities: Vec<f64>,
-    ) {
-        wavelengths.into_iter().zip(intensities).for_each(|(λ, i)| {
-            self.measurement.append_value(measurement);
-            self.wavelength.append_value(λ);
-            self.intensity.append_value(i);
-        })
+    pub(super) fn push(&mut self, measurement: u32, wavelengths: &Vec<u32>, intensities: Vec<f64>) {
+        wavelengths
+            .into_iter()
+            .map(u32::clone)
+            .zip(intensities)
+            .for_each(|(λ, i)| {
+                self.measurement.append_value(measurement);
+                self.wavelength.append_value(λ);
+                self.intensity.append_value(i);
+            })
     }
 
     pub(super) fn columns(&mut self) -> Vec<ArrayRef> {

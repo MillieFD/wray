@@ -44,8 +44,8 @@ impl Intensities {
             .try_into()
     }
 
-    pub fn push(&mut self, measurement: u32, wavelengths: Vec<u32>, intensities: Vec<f64>) {
-        self.builder.append(measurement, wavelengths, intensities);
+    pub fn push(&mut self, measurement: u32, wavelengths: &Vec<u32>, intensities: Vec<f64>) {
+        self.builder.push(measurement, wavelengths, intensities);
     }
 
     pub fn commit(&mut self) -> Result<(), Error> {

@@ -1,5 +1,5 @@
 [package]
-name = "optic"
+name = "wray"
 version = "0.1.0"
 edition = "2024"
 description = "Standardised data storage for diffuse reflectance spectroscopy imaging, written in Rust."
@@ -12,7 +12,7 @@ repository = "https://github.com/MillieFD/optic"
 # See a full list of keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
-name = "optic"
+name = "wray"
 crate-type = ["lib"]
 
 [features]

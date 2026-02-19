@@ -52,6 +52,8 @@ impl Database {
 mod tests {
     use std::fs::{File, remove_dir_all};
 
+    use arrow::array::AsArray;
+    use arrow::datatypes::UInt32Type;
     use arrow::ipc::reader::StreamReader;
     use arrow::ipc::writer::FileWriter;
 
@@ -81,6 +83,43 @@ mod tests {
         let mut db = Database::new(PATH).unwrap();
         let ids = db.wavelengths.push(vec![1E-9, 1E-3, 1E3, 1E9]).unwrap();
         assert_eq!(ids, vec![0, 1, 2, 3]);
+        remove_dir_all(PATH).unwrap();
+    }
+
+    #[test]
+    fn commit_and_read_wavelengths() {
+        const PATH: &str = "test-commit-and-read";
+        let mut db = Database::new(PATH).unwrap();
+
+        // 1. Write wavelength data to disk
+        let ids = db
+            .wavelengths
+            .push(vec![1E-9, 1E-3, 1E3, 1E9])
+            .expect("Failed to push wavelengths");
+        db.wavelengths
+            .commit()
+            .expect("Failed to commit wavelengths");
+
+        // 2. Read back wavelength data from disk
+        let file = File::open(&db.wavelengths.path).expect("Failed to open wavelengths file");
+        let reader = StreamReader::try_new(file, None).expect("Failed to create StreamReader");
+        let data: Vec<u32> =
+            reader
+                .into_iter()
+                .filter_map(Result::ok)
+                .fold(Vec::new(), |mut ids, batch| {
+                    batch
+                        .column_by_name("id")
+                        .expect("Unable to read 'id' column")
+                        .as_primitive::<UInt32Type>()
+                        .values()
+                        .iter()
+                        .collect_into(&mut ids)
+                        .to_owned()
+                });
+
+        // 3. Check that read data matches written data
+        assert_eq!(ids, data);
         remove_dir_all(PATH).unwrap();
     }
 

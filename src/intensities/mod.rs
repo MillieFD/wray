@@ -87,7 +87,7 @@ impl TryFrom<File> for Intensities {
 
     fn try_from(file: File) -> Result<Self, Self::Error> {
         Ok(Self {
-            stream: StreamWriter::try_new(file, &Self::SCHEMA)?,
+            stream: Self::new_stream_writer(file)?,
             builder: Builder::new(),
         })
     }

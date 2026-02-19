@@ -137,7 +137,7 @@ impl TryFrom<PathBuf> for Wavelengths {
             .truncate(false)
             .open(&path)?;
         Ok(Self {
-            stream: StreamWriter::try_new(file, &Self::SCHEMA)?,
+            stream: Self::new_stream_writer(file)?,
             builder: Builder::new(),
             path,
         })

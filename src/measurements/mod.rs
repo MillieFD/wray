@@ -105,7 +105,7 @@ impl TryFrom<PathBuf> for Measurements {
             .create(true)
             .truncate(false)
             .open(&path)?;
-        let stream = StreamWriter::try_new(file, &Self::SCHEMA)?;
+        let stream = Self::new_stream_writer(file)?;
         let builder = Builder::new(&path);
         let db = Self { stream, builder };
         Ok(db)

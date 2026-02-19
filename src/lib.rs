@@ -17,7 +17,7 @@ mod wavelengths;
 mod writer;
 
 use std::fs::DirBuilder;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub use self::error::Error;
 use self::intensities::Intensities;
@@ -33,9 +33,12 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn new(filepath: &str) -> Result<Database, Error> {
+    pub fn new<P>(filepath: &P) -> Result<Database, Error>
+    where
+        P: AsRef<Path> + ?Sized,
+    {
         DirBuilder::new().recursive(true).create(&filepath)?;
-        let path = PathBuf::from(filepath).canonicalize()?;
+        let path = filepath.as_ref().canonicalize()?;
         let db = Database {
             wavelengths: Wavelengths::new(&path)?,
             measurements: Measurements::new(&path)?,

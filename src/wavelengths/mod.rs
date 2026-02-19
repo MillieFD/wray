@@ -97,7 +97,7 @@ impl Wavelengths {
                         Some(record) if record.nm.sub(wl).value > TOLERANCE => continue,
                         _ => {
                             let id = next.fetch_add(1, Ordering::Relaxed);
-                            self.builder.append(id, wl);
+                            self.builder.push(id, wl);
                             break Some(id);
                         }
                     }

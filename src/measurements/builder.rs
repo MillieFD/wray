@@ -93,7 +93,7 @@ impl Builder {
             .unwrap_or_default()
     }
 
-    pub fn append(
+    pub fn push(
         &mut self,
         #[cfg(feature = "x")] x: Length,
         #[cfg(feature = "y")] y: Length,

@@ -31,7 +31,7 @@ impl Builder {
         }
     }
 
-    pub(super) fn append(&mut self, id: u32, wavelength: Length) {
+    pub(super) fn push(&mut self, id: u32, wavelength: Length) {
         self.id.append_value(id);
         self.nm.append_value(wavelength.get::<nanometer>());
     }

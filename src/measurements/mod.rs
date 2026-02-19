@@ -54,7 +54,7 @@ impl Measurements {
         #[cfg(feature = "a")] a: Length,
         i: Time,
     ) -> u32 {
-        self.builder.append(
+        self.builder.push(
             #[cfg(feature = "x")]
             x,
             #[cfg(feature = "y")]

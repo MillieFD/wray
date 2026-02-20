@@ -25,21 +25,21 @@ use self::measurements::Measurements;
 use self::wavelengths::Wavelengths;
 use self::writer::Writer;
 
-pub struct Database {
+pub struct Dataset {
     pub path: PathBuf,
     pub wavelengths: Wavelengths,
     pub measurements: Measurements,
     pub intensities: Intensities,
 }
 
-impl Database {
-    pub fn new<P>(filepath: &P) -> Result<Database, Error>
+impl Dataset {
+    pub fn new<P>(filepath: &P) -> Result<Dataset, Error>
     where
         P: AsRef<Path> + ?Sized,
     {
         DirBuilder::new().recursive(true).create(&filepath)?;
         let path = filepath.as_ref().canonicalize()?;
-        let db = Database {
+        let db = Dataset {
             wavelengths: Wavelengths::new(&path)?,
             measurements: Measurements::new(&path)?,
             intensities: Intensities::new(&path)?,
@@ -64,7 +64,7 @@ mod tests {
     #[test]
     fn database_creation() {
         const PATH: &str = "test-creation";
-        let db = Database::new(PATH).unwrap();
+        let db = Dataset::new(PATH).unwrap();
         assert!(db.path.exists());
         remove_dir_all(PATH).unwrap();
     }
@@ -72,7 +72,7 @@ mod tests {
     #[test]
     fn wavelengths_schema() {
         const PATH: &str = "test-wavelengths-schema";
-        let db = Database::new(PATH).unwrap();
+        let db = Dataset::new(PATH).unwrap();
         let file = File::open(db.wavelengths.path).unwrap();
         let reader = StreamReader::try_new(file, None).unwrap();
         let schema = reader.schema();
@@ -83,7 +83,7 @@ mod tests {
     #[test]
     fn push_wavelengths() {
         const PATH: &str = "test-push-wavelengths";
-        let mut db = Database::new(PATH).unwrap();
+        let mut db = Dataset::new(PATH).unwrap();
         let ids = db.wavelengths.push(vec![1E-9, 1E-3, 1E3, 1E9]).unwrap();
         assert_eq!(ids, vec![0, 1, 2, 3]);
         remove_dir_all(PATH).unwrap();
@@ -92,7 +92,7 @@ mod tests {
     #[test]
     fn commit_and_read_wavelengths() {
         const PATH: &str = "test-commit-and-read";
-        let mut db = Database::new(PATH).unwrap();
+        let mut db = Dataset::new(PATH).unwrap();
 
         // 1. Write wavelength data to disk
         let ids = db
@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn finalise() {
         const PATH: &str = "test-finalise";
-        let db = Database::new(PATH).unwrap();
+        let db = Dataset::new(PATH).unwrap();
         let input = File::open(db.wavelengths.path).unwrap();
         let reader = StreamReader::try_new(input, None).unwrap();
         let schema = reader.schema();

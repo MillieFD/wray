@@ -23,8 +23,8 @@ mod writer;
 use std::fs::DirBuilder;
 use std::path::{Path, PathBuf};
 
-/* ------------------------------------------------------------------------------ Public
- * Exports */
+/* ------------------------------------------------------------------------------ Public Exports */
+
 pub use self::error::Error;
 use self::intensities::Intensities;
 use self::measurements::Measurements;

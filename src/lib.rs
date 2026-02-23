@@ -23,13 +23,14 @@ mod writer;
 use std::fs::DirBuilder;
 use std::path::{Path, PathBuf};
 
-/* ------------------------------------------------------------------------------ Public Exports */
-
-pub use self::error::Error;
 use self::intensities::Intensities;
 use self::measurements::Measurements;
 use self::wavelengths::Wavelengths;
 use self::writer::Writer;
+
+/* ------------------------------------------------------------------------------ Public Exports */
+
+pub use self::error::Error;
 
 pub struct Dataset {
     pub path: PathBuf,

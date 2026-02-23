@@ -10,15 +10,21 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 #![feature(iter_collect_into)]
 
+/* ----------------------------------------------------------------------------- Private Modules */
+
 mod error;
 mod intensities;
 mod measurements;
 mod wavelengths;
 mod writer;
 
+/* ----------------------------------------------------------------------------- Private Imports */
+
 use std::fs::DirBuilder;
 use std::path::{Path, PathBuf};
 
+/* ------------------------------------------------------------------------------ Public
+ * Exports */
 pub use self::error::Error;
 use self::intensities::Intensities;
 use self::measurements::Measurements;

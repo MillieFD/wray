@@ -1,6 +1,6 @@
 /*
-Project: Optic
-GitHub: https://github.com/MillieFD/optic
+Project: Wray
+GitHub: https://github.com/MillieFD/wray
 
 BSD 3-Clause License, Copyright (c) 2026, Amelia Fraser-Dale
 

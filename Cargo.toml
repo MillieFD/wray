@@ -7,7 +7,7 @@ categories = ["science", "science::robotics", "database-implementations"]
 keywords = ["database", "data-storage", "spectroscopy", "imaging", "optics"]
 license = "BSD-3-Clause"
 authors = ["Amelia Fraser-Dale"]
-repository = "https://github.com/MillieFD/optic"
+repository = "https://github.com/MillieFD/wray"
 
 # See a full list of keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

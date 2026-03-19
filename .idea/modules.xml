@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/optic.iml" filepath="$PROJECT_DIR$/.idea/optic.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/wray.iml" filepath="$PROJECT_DIR$/.idea/wray.iml" />
     </modules>
   </component>
 </project>

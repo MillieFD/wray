@@ -1,5 +1,5 @@
 <component name="CopyrightManager">
-  <settings default="BSD-3-optic">
+  <settings default="BSD-3-wray">
     <LanguageOptions name="__TEMPLATE__">
       <option name="prefixLines" value="false" />
     </LanguageOptions>

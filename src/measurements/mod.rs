@@ -21,13 +21,13 @@ use arrow::array::RecordBatch;
 use arrow::datatypes::DataType::{Float32, UInt32, UInt64};
 use arrow::datatypes::{Field, Schema};
 use arrow::ipc::writer::StreamWriter;
-use uom::si::f64::{Angle, Length, Time};
+use uom::si::f32::{Angle, Length, Time};
 use uom::si::time::microsecond;
 
 use self::builder::Builder;
-use crate::Error;
 use crate::format::{Buf, Units};
 use crate::writer::Writer;
+use crate::{Config, Error};
 
 /* -------------------------------------------------------------------------------- Constants */
 
@@ -42,38 +42,27 @@ const SIZE: usize = 8_192;
 /// as `UInt64` microsecond offsets from the manifest epoch. Coordinate columns
 /// (`x`, `y`, `z`, `a`) are nullable `Float32`.
 pub(crate) struct Measurements {
+    // TODO add one-line doc comment for each field
     stream: StreamWriter<Buf>,
     buf: Buf,
     builder: Builder,
     next_id: u32,
-    init_ts: i64,
-    x_unit: Option<Units>,
-    y_unit: Option<Units>,
-    z_unit: Option<Units>,
-    a_unit: Option<Units>,
+    epoch: i64,
+    cfg: Config,
 }
 
 impl Measurements {
     /// Create a new, empty measurements table.
-    pub fn new(
-        init_ts: i64,
-        x_unit: Option<Units>,
-        y_unit: Option<Units>,
-        z_unit: Option<Units>,
-        a_unit: Option<Units>,
-    ) -> Result<Self, Error> {
+    pub fn new(epoch: i64, cfg: &Config) -> Result<Self, Error> {
         let buf = Buf::new();
-        let stream = Self::new_stream_writer(buf.clone())?;
+        let stream = Self::new_stream_writer(buf.clone())?; // TODO Can we avoid this clone or make it cheaper by using an Arc inside `Buf`?
         Ok(Self {
             stream,
             buf,
             builder: Builder::new(),
             next_id: 0,
-            init_ts,
-            x_unit,
-            y_unit,
-            z_unit,
-            a_unit,
+            epoch,
+            cfg: cfg.clone(), // Inavoidable deep clone not in hot-path.
         })
     }
 
@@ -95,14 +84,14 @@ impl Measurements {
             .elapsed()
             .expect("system clock after epoch")
             .as_micros() as i64
-            - self.init_ts;
+            - self.epoch;
         let ts = ts as u64;
         let id = self.next_id;
         self.next_id += 1;
-        let x = convert_length(x, self.x_unit, "x")?;
-        let y = convert_length(y, self.y_unit, "y")?;
-        let z = convert_length(z, self.z_unit, "z")?;
-        let a = convert_angle(a, self.a_unit, "a")?;
+        let x = convert_length(x, self.cfg.x, "x")?;
+        let y = convert_length(y, self.cfg.y, "y")?;
+        let z = convert_length(z, self.cfg.z, "z")?;
+        let a = convert_angle(a, self.cfg.a, "a")?;
         let integration = integration.get::<microsecond>() as u64;
         self.builder.push(id, ts, x, y, z, a, integration);
         if self.builder.len() >= SIZE {

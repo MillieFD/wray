@@ -12,8 +12,8 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, Float64Builder, UInt16Builder};
-use uom::si::f64::Length;
+use arrow::array::{ArrayRef, Float32Builder, UInt16Builder};
+use uom::si::f32::Length;
 use uom::si::length::nanometer;
 
 /* ------------------------------------------------------------------------------ Public Exports */
@@ -21,7 +21,7 @@ use uom::si::length::nanometer;
 /// Arrow record-batch builder for the wavelengths table.
 pub(super) struct Builder {
     id: UInt16Builder,
-    nm: Float64Builder,
+    nm: Float32Builder,
     len: usize,
 }
 

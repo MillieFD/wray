@@ -12,7 +12,7 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 use std::cmp::Ordering;
 
-use uom::si::f64::Length;
+use uom::si::f32::Length;
 
 /* ------------------------------------------------------------------------------ Public Exports */
 

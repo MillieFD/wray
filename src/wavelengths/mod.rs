@@ -21,7 +21,7 @@ use arrow::array::RecordBatch;
 use arrow::datatypes::DataType::{Float64, UInt16};
 use arrow::datatypes::{Field, Schema};
 use arrow::ipc::writer::StreamWriter;
-use uom::si::f64::Length;
+use uom::si::f32::Length;
 use uom::si::length::nanometer;
 
 use self::builder::Builder;
@@ -67,8 +67,8 @@ impl Wavelengths {
     /// Duplicate wavelengths (within `TOLERANCE` nm) reuse existing IDs.
     /// New wavelengths are assigned sequential IDs starting after the
     /// current maximum.
-    pub fn push(&mut self, wavelengths: &[f64]) -> Result<Vec<u16>, Error> {
-        const TOLERANCE: f64 = 1E-12;
+    pub fn push(&mut self, wavelengths: &[f32]) -> Result<Vec<u16>, Error> {
+        const TOLERANCE: f32 = 1E-12;
         let mut next = self
             .records
             .iter()

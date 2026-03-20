@@ -14,26 +14,31 @@ use std::cell::RefCell;
 use std::fmt::{Display, Formatter};
 use std::io::{self, Read, Write};
 use std::rc::Rc;
+use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 use uom::si::angle::{degree, radian};
-use uom::si::f64::{Angle, Length};
+use uom::si::f32::{Angle, Length};
 use uom::si::length::{meter, micrometer, millimeter, nanometer};
 
 use crate::Error;
 
 /* -------------------------------------------------------------------------------- Constants */
 
-/// Magic bytes at the start of every `.wray` file.
+/// Magic bytes at the start of every `.wr` file.
+// TODO Change file extension to `.wr`. Ensure file extension is always used.
 pub(crate) const MAGIC: &[u8; 4] = b"WRAY";
 
 /// Current format version.
 pub(crate) const VERSION: u32 = 1;
 
-/// Fixed header size in bytes.
-pub(crate) const HEADER_SIZE: usize = 40;
+/// Length (in bytes) of the fixed size file header.
+// TODO How is semantic versioning stored in a single `u32`? Use three `u8` instead e.g. for 1.0.0?
+// TODO Can HEADER size be determined at compiletime by defining what is in the header?
+pub(crate) const HEADER: usize = MAGIC.len() + size_of::<u32>() + 4 * size_of::<u64>();
 
 /// Arrow IPC end-of-stream sentinel (continuation marker + zero metadata size).
+// TODO Remove EOS constant. Bytes written automatically on arrow::ipc::writer::StreamWriter::finish
 pub(crate) const EOS: [u8; 8] = [0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00];
 
 /* ------------------------------------------------------------------------------ Public Exports */
@@ -41,6 +46,8 @@ pub(crate) const EOS: [u8; 8] = [0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00]
 /// Physical unit for a coordinate axis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+// TODO Remove UOM crate. Remove Units table from manifest. Lengths always use meters as f32. Angles always use radians as f32. Refactor Units enum to have two variants: Length or Angle.
+// TODO Remove uom dependency. Use raw f32 and f64 always with SI base units (e.g. meter or radian)
 pub enum Units {
     /// Nanometres.
     Nm,
@@ -74,10 +81,10 @@ impl Units {
     /// Panics if `self` is an angle unit ([`Units::Deg`] or [`Units::Rad`]).
     pub fn length_to_f32(self, v: Length) -> f32 {
         match self {
-            Self::Nm => v.get::<nanometer>() as f32,
-            Self::Um => v.get::<micrometer>() as f32,
-            Self::Mm => v.get::<millimeter>() as f32,
-            Self::M => v.get::<meter>() as f32,
+            Self::Nm => v.get::<nanometer>(),
+            Self::Um => v.get::<micrometer>(),
+            Self::Mm => v.get::<millimeter>(),
+            Self::M => v.get::<meter>(),
             _ => panic!("not a length unit"),
         }
     }
@@ -86,7 +93,8 @@ impl Units {
     ///
     /// # Panics
     ///
-    /// Panics if `self` is a length unit ([`Units::Nm`], [`Units::Um`], [`Units::Mm`], or [`Units::M`]).
+    /// Panics if `self` is a length unit ([`Units::Nm`], [`Units::Um`], [`Units::Mm`], or
+    /// [`Units::M`]).
     pub fn angle_to_f32(self, v: Angle) -> f32 {
         match self {
             Self::Deg => v.get::<degree>() as f32,
@@ -134,6 +142,8 @@ impl Units {
     }
 }
 
+/* ----------------------------------------------------------------------- Trait Implementations */
+
 impl Display for Units {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match self {
@@ -155,30 +165,34 @@ impl Display for Units {
 /// Omit an axis to leave it unused (nullable column, all nulls).
 #[derive(Debug, Clone, Default)]
 pub struct Config {
-    /// Unit for the x coordinate axis.
+    // TODO Add mem::size_of() test to ensure Option<Units> is niche optimised
+    /// Unit for the `x` coordinate axis.
     pub x: Option<Units>,
-    /// Unit for the y coordinate axis.
+    /// Unit for the `y` coordinate axis.
     pub y: Option<Units>,
-    /// Unit for the z coordinate axis.
+    /// Unit for the `z` coordinate axis.
     pub z: Option<Units>,
-    /// Unit for the angle coordinate axis.
+    /// Unit for the `a` coordinate axis.
     pub a: Option<Units>,
+    // TODO add "b" and "c" fields (six total). Any axis can use any units (length or angle).
 }
 
 /* --------------------------------------------------------------------------------- Manifest */
 
-/// Experiment-level metadata stored in every `.wray` file.
+/// Experiment-level metadata stored in every `.wr` file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
-    /// Format version (currently `1.0`).
-    pub version: f64,
+    /// Wray format version.
+    pub version: u32,
     /// Absolute UNIX epoch timestamp in microseconds when the dataset was created.
+    // // TODO use u64 instead. Do not allow negative timestamp.
     pub timestamp: i64,
     /// Measurement IDs that are calibration measurements.
     pub calibrations: Vec<u32>,
     /// Whether the dataset has been explicitly finalised.
     pub finished: bool,
     /// Per-axis storage units.
+    // TODO Remove ManifestUnits struct. Store Config struct.
     pub units: ManifestUnits,
 }
 
@@ -203,11 +217,12 @@ impl Manifest {
     /// Create a new manifest for the given creation timestamp and configuration.
     pub(crate) fn new(timestamp: i64, cfg: &Config) -> Self {
         Self {
-            version: 1.0,
+            version: VERSION,
             timestamp,
-            calibrations: Vec::new(),
+            calibrations: Vec::with_capacity(8),
             finished: false,
             units: ManifestUnits {
+                // TODO Remove ManifestUnits struct and store Config struct directly?
                 x: cfg.x,
                 y: cfg.y,
                 z: cfg.z,
@@ -241,10 +256,10 @@ impl Header {
 
     /// Read and validate the header from `r`.
     pub fn read<R: Read>(r: &mut R) -> Result<Self, Error> {
-        let mut buf = [0u8; HEADER_SIZE];
+        let mut buf = [0u8; HEADER];
         r.read_exact(&mut buf)?;
         if &buf[0..4] != MAGIC {
-            return Err(Error::InvalidFormat("invalid magic bytes".into()));
+            return Err(Error::InvalidFormat("Invalid magic bytes".into()));
         }
         let version = u32::from_le_bytes(buf[4..8].try_into().expect("4 bytes"));
         if version != VERSION {
@@ -274,12 +289,18 @@ pub(crate) struct Buf(Rc<RefCell<Vec<u8>>>);
 impl Buf {
     /// Create an empty buffer.
     pub fn new() -> Self {
-        Self(Rc::new(RefCell::new(Vec::new())))
+        Self::default()
     }
 
     /// Clone the accumulated bytes.
     pub fn bytes(&self) -> Vec<u8> {
         self.0.borrow().clone()
+    }
+}
+
+impl Default for Buf {
+    fn default() -> Self {
+        Self(Rc::default())
     }
 }
 

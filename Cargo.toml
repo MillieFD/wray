@@ -20,10 +20,10 @@ version = "58.0"
 default-features = false
 features = ["ipc_compression"]
 
-[dependencies.uom]
+[dependencies.uom] # TODO Remove uom dependency
 version = "0.38"
 default-features = false
-features = ["si", "f64"]
+features = ["si", "f32"]
 
 [dependencies.toml]
 version = "1.0.7+spec-1.1.0"

@@ -10,13 +10,16 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
+// TODO Move into existing intensities, measurements, and wavelengths modules respective, under sub-modules named "Record".
+
 /// A single wavelength entry returned by read queries.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WavelengthRecord {
     /// Unique wavelength identifier.
     pub id: u16,
     /// Wavelength in nanometres.
-    pub nm: f64,
+    // TODO update wavelength to use `f32` throughout codebase & documentation.
+    pub nm: f32,
 }
 
 /// A single measurement entry returned by read queries.

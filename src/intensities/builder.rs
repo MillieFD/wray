@@ -12,38 +12,50 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, Float64Builder, UInt32Builder};
+use arrow::array::{ArrayRef, Float64Builder, UInt16Builder, UInt32Builder};
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
+/// Arrow record-batch builder for the intensities table.
 pub(super) struct Builder {
     measurement: UInt32Builder,
-    wavelength: UInt32Builder,
+    wavelength: UInt16Builder,
     intensity: Float64Builder,
+    len: usize,
 }
 
 impl Builder {
-    pub(super) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             measurement: Default::default(),
             wavelength: Default::default(),
             intensity: Default::default(),
+            len: 0,
         }
     }
 
-    pub(super) fn push(&mut self, measurement: u32, wavelengths: &Vec<u32>, intensities: Vec<f64>) {
+    /// Expand one measurement's wavelength/intensity vectors into rows.
+    pub fn push(&mut self, measurement: u32, wavelengths: &[u16], intensities: &[f64]) {
         wavelengths
-            .into_iter()
-            .map(u32::clone)
-            .zip(intensities)
+            .iter()
+            .copied()
+            .zip(intensities.iter().copied())
             .for_each(|(λ, i)| {
                 self.measurement.append_value(measurement);
                 self.wavelength.append_value(λ);
                 self.intensity.append_value(i);
-            })
+                self.len += 1;
+            });
     }
 
-    pub(super) fn columns(&mut self) -> Vec<ArrayRef> {
+    /// Number of rows pending since the last [`columns`] call.
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Finish the current arrays and return them as columns. Resets the builder.
+    pub fn columns(&mut self) -> Vec<ArrayRef> {
+        self.len = 0;
         vec![
             Arc::new(self.measurement.finish()),
             Arc::new(self.wavelength.finish()),

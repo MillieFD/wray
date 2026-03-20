@@ -16,37 +16,38 @@ use uom::si::f64::Length;
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
+/// In-memory representation of a single wavelength entry.
 #[derive(Copy, Clone, Debug, Default)]
-pub(super) struct Record {
-    pub id: u32,
+pub(crate) struct Record {
+    pub id: u16,
     pub nm: Length,
 }
 
 impl Record {
-    pub(super) fn new(id: u32, nm: Length) -> Self {
+    pub(crate) fn new(id: u16, nm: Length) -> Self {
         Self { id, nm }
     }
 }
 
 /* ----------------------------------------------------------------------- Trait Implementations */
 
-impl From<(u32, Length)> for Record {
-    fn from((id, wl): (u32, Length)) -> Self {
-        Self::new(id, wl)
+impl From<(u16, Length)> for Record {
+    fn from((id, nm): (u16, Length)) -> Self {
+        Self::new(id, nm)
     }
 }
 
 impl Eq for Record {}
 
-impl PartialEq<Self> for Record {
+impl PartialEq for Record {
     fn eq(&self, other: &Self) -> bool {
         self.nm == other.nm
     }
 }
 
-impl PartialOrd<Self> for Record {
+impl PartialOrd for Record {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.nm.partial_cmp(&other.nm)
+        Some(self.cmp(other))
     }
 }
 

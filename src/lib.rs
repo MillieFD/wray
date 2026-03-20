@@ -8,51 +8,504 @@ Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the conditions of the LICENSE are met.
 */
 
-#![feature(iter_collect_into)]
+//! TODO write crate-level docs
 
 /* ----------------------------------------------------------------------------- Private Modules */
 
 mod error;
+mod format;
 mod intensities;
 mod measurements;
+mod records;
 mod wavelengths;
 mod writer;
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
-use std::fs::DirBuilder;
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
+use arrow::array::{Array, AsArray, PrimitiveArray, RecordBatch};
+use arrow::datatypes::{
+    ArrowPrimitiveType,
+    Float32Type,
+    Float64Type,
+    UInt16Type,
+    UInt32Type,
+    UInt64Type,
+};
+use arrow::ipc::reader::StreamReader;
+use uom::si::f64::{Angle, Length, Time};
+
+/* ------------------------------------------------------------------------------ Public
+ * Exports */
+pub use self::error::Error;
+use self::format::{Config, EOS, HEADER_SIZE, Header};
+pub use self::format::{Config as DatasetConfig, Manifest, ManifestUnits, Units};
 use self::intensities::Intensities;
 use self::measurements::Measurements;
+pub use self::records::{IntensityRecord, MeasurementRecord, WavelengthRecord};
 use self::wavelengths::Wavelengths;
-use self::writer::Writer;
 
-/* ------------------------------------------------------------------------------ Public Exports */
-
-pub use self::error::Error;
-
+/// A `.wray` dataset for storing spatially located optical spectroscopy data.
+///
+/// Create a new dataset with [`Dataset::new`], push data with the various
+/// `push_*` methods, and finalise with [`Dataset::close`] or
+/// [`Dataset::finish`]. The dataset is also written on [`Drop`].
+///
+/// Open an existing file for reading with [`Dataset::open`].
 pub struct Dataset {
-    pub path: PathBuf,
-    pub wavelengths: Wavelengths,
-    pub measurements: Measurements,
-    pub intensities: Intensities,
+    path: PathBuf,
+    manifest: Manifest,
+    wavelengths: Option<Wavelengths>,
+    measurements: Option<Measurements>,
+    intensities: Option<Intensities>,
+    /// Raw IPC bytes for each section (populated by [`open`] or after close).
+    wl_bytes: Vec<u8>,
+    ms_bytes: Vec<u8>,
+    it_bytes: Vec<u8>,
+    closed: bool,
 }
 
 impl Dataset {
-    pub fn new<P>(filepath: &P) -> Result<Dataset, Error>
-    where
-        P: AsRef<Path> + ?Sized,
-    {
-        DirBuilder::new().recursive(true).create(&filepath)?;
-        let path = filepath.as_ref().canonicalize()?;
-        let db = Dataset {
-            wavelengths: Wavelengths::new(&path)?,
-            measurements: Measurements::new(&path)?,
-            intensities: Intensities::new(&path)?,
-            path,
+    /* ----------------------------------------------------------------- Construction */
+
+    /// Create a new `.wray` dataset at `path`.
+    ///
+    /// The file is not written to disk until [`close`](Self::close),
+    /// [`finish`](Self::finish), [`commit`](Self::commit), or [`Drop`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] if the Arrow IPC stream writers cannot be initialised.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the system clock is set before the UNIX epoch.
+    pub fn new(path: impl AsRef<Path>, cfg: &Config) -> Result<Self, Error> {
+        let timestamp = SystemTime::UNIX_EPOCH
+            .elapsed()
+            .expect("system clock after epoch")
+            .as_micros() as i64;
+        let manifest = Manifest::new(timestamp, cfg);
+        Ok(Self {
+            path: path.as_ref().to_path_buf(),
+            manifest,
+            wavelengths: Some(Wavelengths::new()?),
+            measurements: Some(Measurements::new(timestamp, cfg.x, cfg.y, cfg.z, cfg.a)?),
+            intensities: Some(Intensities::new()?),
+            wl_bytes: Vec::new(),
+            ms_bytes: Vec::new(),
+            it_bytes: Vec::new(),
+            closed: false,
+        })
+    }
+
+    /// Open an existing `.wray` file for reading.
+    ///
+    /// Validates the magic bytes and format version, parses the manifest,
+    /// and stores the raw Arrow IPC sections for query access.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] if the file cannot be read, the header is invalid,
+    /// or the manifest TOML is malformed.
+    pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
+        let data = std::fs::read(path.as_ref())?;
+        let header = Header::read(&mut &data[..])?;
+        let m_start = HEADER_SIZE;
+        let m_end = m_start + header.manifest_len as usize;
+        let manifest: Manifest = toml::from_str(std::str::from_utf8(&data[m_start..m_end])?)?;
+        let wl_start = m_end;
+        let wl_end = wl_start + header.wavelengths_len as usize;
+        let ms_start = wl_end;
+        let ms_end = ms_start + header.measurements_len as usize;
+        let it_start = ms_end;
+        let it_end = it_start + header.intensities_len as usize;
+        Ok(Self {
+            path: path.as_ref().to_path_buf(),
+            manifest,
+            wavelengths: None,
+            measurements: None,
+            intensities: None,
+            wl_bytes: data[wl_start..wl_end].to_vec(),
+            ms_bytes: data[ms_start..ms_end].to_vec(),
+            it_bytes: data[it_start..it_end].to_vec(),
+            closed: true,
+        })
+    }
+
+    /* ----------------------------------------------------------------- Push API */
+
+    /// Insert wavelengths (in nanometres) and return their `u16` IDs.
+    ///
+    /// Duplicate wavelengths are deduplicated with 1 × 10⁻¹² nm tolerance.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] if the Arrow builder cannot flush to the IPC stream.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the dataset was opened read-only (via [`open`](Self::open)).
+    pub fn push_wavelengths(&mut self, wavelengths: &[f64]) -> Result<Vec<u16>, Error> {
+        self.wavelengths
+            .as_mut()
+            .expect("dataset open for writing")
+            .push(wavelengths)
+    }
+
+    /// Record a new measurement. Returns the assigned `u32` ID.
+    ///
+    /// The timestamp is captured automatically. Pass `None` for unused
+    /// coordinate axes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] if the Arrow builder cannot flush to the IPC stream.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the dataset was opened read-only (via [`open`](Self::open)).
+    pub fn push(
+        &mut self,
+        x: Option<Length>,
+        y: Option<Length>,
+        z: Option<Length>,
+        a: Option<Angle>,
+        integration: Time,
+    ) -> Result<u32, Error> {
+        self.measurements
+            .as_mut()
+            .expect("dataset open for writing")
+            .push(x, y, z, a, integration)
+    }
+
+    /// Record intensity values for a single measurement.
+    ///
+    /// `wavelengths` and `intensities` must have the same length.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] if the Arrow builder cannot flush to the IPC stream.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the dataset was opened read-only (via [`open`](Self::open)).
+    pub fn push_intensities(
+        &mut self,
+        measurement: u32,
+        wavelengths: &[u16],
+        intensities: &[f64],
+    ) -> Result<(), Error> {
+        self.intensities
+            .as_mut()
+            .expect("dataset open for writing")
+            .push(measurement, wavelengths, intensities)
+    }
+
+    /* ----------------------------------------------------------------- Calibrations */
+
+    /// Mark a measurement ID as a calibration measurement.
+    pub fn calibration(&mut self, id: u32) {
+        self.manifest.calibrations.push(id);
+    }
+
+    /* ----------------------------------------------------------------- Lifecycle */
+
+    /// Flush all pending data and write the `.wray` file to disk.
+    ///
+    /// Consumes `self`. Use this when you need to handle write errors.
+    /// The manifest `finished` flag remains `false`, allowing the file
+    /// to be reopened for appending.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] if the IPC streams cannot be finalised or the file cannot be written.
+    pub fn close(mut self) -> Result<(), Error> {
+        self.write_to_disk()?;
+        self.closed = true;
+        Ok(())
+    }
+
+    /// Finalise and write the `.wray` file to disk.
+    ///
+    /// Like [`close`](Self::close) but sets `manifest.finished = true`,
+    /// signalling that no more data will be appended.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] if the IPC streams cannot be finalised or the file cannot be written.
+    pub fn finish(mut self) -> Result<(), Error> {
+        self.manifest.finished = true;
+        self.write_to_disk()?;
+        self.closed = true;
+        Ok(())
+    }
+
+    /// Write a snapshot of the current data to disk without consuming `self`.
+    ///
+    /// Useful for long-running experiments that need periodic durability.
+    /// The in-memory streams continue accumulating data after this call.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] if any IPC stream cannot be flushed or the file cannot be written.
+    pub fn commit(&mut self) -> Result<(), Error> {
+        // Flush builders into streams (but do not write EOS)
+        if let Some(ref mut wl) = self.wavelengths {
+            wl.flush()?;
+        }
+        if let Some(ref mut ms) = self.measurements {
+            ms.flush()?;
+        }
+        if let Some(ref mut it) = self.intensities {
+            it.flush()?;
+        }
+        // Snapshot bytes (no EOS) and write with EOS appended
+        let wl = self.wl_snapshot();
+        let ms = self.ms_snapshot();
+        let it = self.it_snapshot();
+        self.write_file(&wl, &ms, &it)
+    }
+
+    /* ----------------------------------------------------------------- Read API */
+
+    /// Borrow the manifest metadata.
+    pub fn manifest(&self) -> &Manifest {
+        &self.manifest
+    }
+
+    /// Read all wavelength records from the dataset.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] if the IPC stream is malformed or a column is missing.
+    pub fn read_wavelengths(&self) -> Result<Vec<WavelengthRecord>, Error> {
+        let bytes = self.wl_section();
+        if bytes.is_empty() {
+            return Ok(Vec::new());
+        }
+        let cursor = Cursor::new(bytes);
+        let reader = StreamReader::try_new(cursor, None)?;
+        let mut out = Vec::new();
+        for batch in reader {
+            let batch = batch?;
+            let ids = batch
+                .column_by_name("id")
+                .ok_or_else(|| Error::MissingColumn("id".into()))?
+                .as_primitive::<UInt16Type>();
+            let nms = batch
+                .column_by_name("nm")
+                .ok_or_else(|| Error::MissingColumn("nm".into()))?
+                .as_primitive::<Float64Type>();
+            for i in 0..batch.num_rows() {
+                out.push(WavelengthRecord {
+                    id: ids.value(i),
+                    nm: nms.value(i),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    /// Read all measurement records from the dataset.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] if the IPC stream is malformed or a column is missing.
+    pub fn read_measurements(&self) -> Result<Vec<MeasurementRecord>, Error> {
+        let bytes = self.ms_section();
+        if bytes.is_empty() {
+            return Ok(Vec::new());
+        }
+        let cursor = Cursor::new(bytes);
+        let reader = StreamReader::try_new(cursor, None)?;
+        let mut out = Vec::new();
+        for batch in reader {
+            let batch = batch?;
+            let ids = col_primitive::<UInt32Type>(&batch, "id")?;
+            let ts = col_primitive::<UInt64Type>(&batch, "timestamp")?;
+            let xs = col_primitive::<Float32Type>(&batch, "x")?;
+            let ys = col_primitive::<Float32Type>(&batch, "y")?;
+            let zs = col_primitive::<Float32Type>(&batch, "z")?;
+            let als = col_primitive::<Float32Type>(&batch, "a")?;
+            let integ = col_primitive::<UInt64Type>(&batch, "integration")?;
+            for i in 0..batch.num_rows() {
+                out.push(MeasurementRecord {
+                    id: ids.value(i),
+                    timestamp: ts.value(i),
+                    x: nullable(xs, i),
+                    y: nullable(ys, i),
+                    z: nullable(zs, i),
+                    a: nullable(als, i),
+                    integration: integ.value(i),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    /// Read all intensity records from the dataset.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] if the IPC stream is malformed or a column is missing.
+    pub fn read_intensities(&self) -> Result<Vec<IntensityRecord>, Error> {
+        let bytes = self.it_section();
+        if bytes.is_empty() {
+            return Ok(Vec::new());
+        }
+        let cursor = Cursor::new(bytes);
+        let reader = StreamReader::try_new(cursor, None)?;
+        let mut out = Vec::new();
+        for batch in reader {
+            let batch = batch?;
+            let ms = col_primitive::<UInt32Type>(&batch, "measurement")?;
+            let wls = col_primitive::<UInt16Type>(&batch, "wavelength")?;
+            let vals = col_primitive::<Float64Type>(&batch, "intensity")?;
+            for i in 0..batch.num_rows() {
+                out.push(IntensityRecord {
+                    measurement: ms.value(i),
+                    wavelength: wls.value(i),
+                    intensity: vals.value(i),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    /* ----------------------------------------------------------------- Internals */
+
+    fn write_to_disk(&mut self) -> Result<(), Error> {
+        if self.closed {
+            return Ok(());
+        }
+        // Finish all streams (writes EOS into the Buf)
+        if let Some(ref mut wl) = self.wavelengths {
+            wl.finish()?;
+        }
+        if let Some(ref mut ms) = self.measurements {
+            ms.finish()?;
+        }
+        if let Some(ref mut it) = self.intensities {
+            it.finish()?;
+        }
+        let wl = self
+            .wavelengths
+            .as_ref()
+            .map_or_else(Vec::new, wavelengths::Wavelengths::bytes);
+        let ms = self
+            .measurements
+            .as_ref()
+            .map_or_else(Vec::new, measurements::Measurements::bytes);
+        let it = self
+            .intensities
+            .as_ref()
+            .map_or_else(Vec::new, intensities::Intensities::bytes);
+        self.write_file(&wl, &ms, &it)
+    }
+
+    fn wl_snapshot(&self) -> Vec<u8> {
+        match &self.wavelengths {
+            Some(wl) => eos(wl.bytes()),
+            None => self.wl_bytes.clone(),
+        }
+    }
+
+    fn ms_snapshot(&self) -> Vec<u8> {
+        match &self.measurements {
+            Some(ms) => eos(ms.bytes()),
+            None => self.ms_bytes.clone(),
+        }
+    }
+
+    fn it_snapshot(&self) -> Vec<u8> {
+        match &self.intensities {
+            Some(it) => eos(it.bytes()),
+            None => self.it_bytes.clone(),
+        }
+    }
+
+    /// Get the wavelengths IPC section bytes (with EOS, ready for `StreamReader`).
+    fn wl_section(&self) -> Vec<u8> {
+        match &self.wavelengths {
+            Some(wl) => eos(wl.bytes()),
+            None => self.wl_bytes.clone(),
+        }
+    }
+
+    fn ms_section(&self) -> Vec<u8> {
+        match &self.measurements {
+            Some(ms) => eos(ms.bytes()),
+            None => self.ms_bytes.clone(),
+        }
+    }
+
+    fn it_section(&self) -> Vec<u8> {
+        match &self.intensities {
+            Some(it) => eos(it.bytes()),
+            None => self.it_bytes.clone(),
+        }
+    }
+
+    fn write_file(&self, wl: &[u8], ms: &[u8], it: &[u8]) -> Result<(), Error> {
+        let manifest_str = toml::to_string(&self.manifest)?;
+        let manifest_bytes = manifest_str.as_bytes();
+        let header = Header {
+            manifest_len: manifest_bytes.len() as u64,
+            wavelengths_len: wl.len() as u64,
+            measurements_len: ms.len() as u64,
+            intensities_len: it.len() as u64,
         };
-        Ok(db)
+        let mut file = std::fs::File::create(&self.path)?;
+        header.write(&mut file)?;
+        std::io::Write::write_all(&mut file, manifest_bytes)?;
+        std::io::Write::write_all(&mut file, wl)?;
+        std::io::Write::write_all(&mut file, ms)?;
+        std::io::Write::write_all(&mut file, it)?;
+        Ok(())
+    }
+}
+
+/* ----------------------------------------------------------------------- Trait Implementations */
+
+impl Drop for Dataset {
+    fn drop(&mut self) {
+        if !self.closed {
+            let _ = self.write_to_disk();
+        }
+    }
+}
+
+/* ---------------------------------------------------------------------------- Helper Functions */
+
+/// Append the 8-byte Arrow IPC EOS sentinel to a byte vector.
+fn eos(mut bytes: Vec<u8>) -> Vec<u8> {
+    bytes.extend_from_slice(&EOS);
+    bytes
+}
+
+/// Extract a typed primitive column from a [`RecordBatch`] by name.
+fn col_primitive<'a, T>(batch: &'a RecordBatch, name: &str) -> Result<&'a PrimitiveArray<T>, Error>
+where
+    T: ArrowPrimitiveType,
+{
+    batch
+        .column_by_name(name)
+        .ok_or_else(|| Error::MissingColumn(name.into()))
+        .map(AsArray::as_primitive::<T>)
+}
+
+/// Read a nullable value at row `i`.
+fn nullable<T>(arr: &PrimitiveArray<T>, i: usize) -> Option<T::Native>
+where
+    T: ArrowPrimitiveType,
+{
+    match arr.is_null(i) {
+        true => None,
+        false => Some(arr.value(i)),
     }
 }
 
@@ -60,93 +513,255 @@ impl Dataset {
 
 #[cfg(test)]
 mod tests {
-    use std::fs::{File, remove_dir_all};
-
-    use arrow::array::AsArray;
-    use arrow::datatypes::UInt32Type;
-    use arrow::ipc::reader::StreamReader;
-    use arrow::ipc::writer::FileWriter;
+    use tempfile::NamedTempFile;
+    use uom::si::angle::degree;
+    use uom::si::f64::{Angle, Length, Time};
+    use uom::si::length::millimeter;
+    use uom::si::time::millisecond;
 
     use super::*;
-    #[test]
-    fn database_creation() {
-        const PATH: &str = "test-creation";
-        let db = Dataset::new(PATH).unwrap();
-        assert!(db.path.exists());
-        remove_dir_all(PATH).unwrap();
+
+    const XY: Config = Config {
+        x: Some(Units::Mm),
+        y: Some(Units::Mm),
+        z: None,
+        a: None,
+    };
+
+    const XYZA: Config = Config {
+        x: Some(Units::Mm),
+        y: Some(Units::Mm),
+        z: Some(Units::Um),
+        a: Some(Units::Deg),
+    };
+
+    fn tmp() -> PathBuf {
+        NamedTempFile::new()
+            .expect("create temp file")
+            .into_temp_path()
+            .to_path_buf()
     }
 
+    /* ------------------------------------------------------------------------- Round-trip test */
+
     #[test]
-    fn wavelengths_schema() {
-        const PATH: &str = "test-wavelengths-schema";
-        let db = Dataset::new(PATH).unwrap();
-        let file = File::open(db.wavelengths.path).unwrap();
-        let reader = StreamReader::try_new(file, None).unwrap();
-        let schema = reader.schema();
-        assert_eq!(schema.fields().len(), 2);
-        remove_dir_all(PATH).unwrap();
+    fn round_trip() {
+        let path = tmp();
+        let wavelengths_nm = vec![400.0, 500.0, 600.0, 700.0];
+        let n = wavelengths_nm.len();
+
+        // PART 1: Write
+        {
+            let mut ds = Dataset::new(&path, &XY).expect("create dataset");
+            let wl_ids = ds
+                .push_wavelengths(&wavelengths_nm)
+                .expect("push wavelengths");
+            assert_eq!(wl_ids, vec![0, 1, 2, 3]);
+
+            let x = Length::new::<millimeter>(1.0);
+            let y = Length::new::<millimeter>(2.0);
+            let integration = Time::new::<millisecond>(100.0);
+            let id = ds
+                .push(Some(x), Some(y), None, None, integration)
+                .expect("push");
+            assert_eq!(id, 0);
+
+            let intensities = vec![0.1, 0.2, 0.3, 0.4];
+            ds.push_intensities(id, &wl_ids, &intensities)
+                .expect("push intensities");
+
+            ds.close().expect("close");
+        }
+
+        // PART 2: Read
+        {
+            let ds = Dataset::open(&path).expect("open dataset");
+            assert!(!ds.manifest().finished);
+            assert_eq!(ds.manifest().version, 1.0);
+
+            let wl = ds.read_wavelengths().expect("read wavelengths");
+            assert_eq!(wl.len(), n);
+            assert_eq!(wl[0].id, 0);
+            assert!((wl[0].nm - 400.0).abs() < 1e-6);
+            assert_eq!(wl[3].id, 3);
+
+            let ms = ds.read_measurements().expect("read measurements");
+            assert_eq!(ms.len(), 1);
+            assert_eq!(ms[0].id, 0);
+            assert!(ms[0].x.is_some());
+            assert!(ms[0].z.is_none());
+
+            let it = ds.read_intensities().expect("read intensities");
+            assert_eq!(it.len(), n);
+            assert_eq!(it[0].measurement, 0);
+            assert_eq!(it[0].wavelength, 0);
+            assert!((it[0].intensity - 0.1).abs() < 1e-12);
+        }
     }
 
+    /* ----------------------------------------------------------------------------- Drop safety */
+
     #[test]
-    fn push_wavelengths() {
-        const PATH: &str = "test-push-wavelengths";
-        let mut db = Dataset::new(PATH).unwrap();
-        let ids = db.wavelengths.push(vec![1E-9, 1E-3, 1E3, 1E9]).unwrap();
-        assert_eq!(ids, vec![0, 1, 2, 3]);
-        remove_dir_all(PATH).unwrap();
+    fn drop_writes_file() {
+        let path = tmp();
+        {
+            let mut ds = Dataset::new(&path, &XY).expect("create");
+            ds.push_wavelengths(&[500.0]).expect("push wl");
+            let integration = Time::new::<millisecond>(50.0);
+            ds.push(None, None, None, None, integration).expect("push");
+            // No explicit close — rely on Drop
+        }
+        let ds = Dataset::open(&path).expect("open after drop");
+        assert_eq!(ds.read_wavelengths().expect("read").len(), 1);
+        assert_eq!(ds.read_measurements().expect("read").len(), 1);
     }
 
+    /* -------------------------------------------------------------------- Optional coordinates */
+
     #[test]
-    fn commit_and_read_wavelengths() {
-        const PATH: &str = "test-commit-and-read";
-        let mut db = Dataset::new(PATH).unwrap();
-
-        // 1. Write wavelength data to disk
-        let ids = db
-            .wavelengths
-            .push(vec![1E-9, 1E-3, 1E3, 1E9])
-            .expect("Failed to push wavelengths");
-        db.wavelengths
-            .commit()
-            .expect("Failed to commit wavelengths");
-
-        // 2. Read back wavelength data from disk
-        let file = File::open(&db.wavelengths.path).expect("Failed to open wavelengths file");
-        let reader = StreamReader::try_new(file, None).expect("Failed to create StreamReader");
-        let data: Vec<u32> =
-            reader
-                .into_iter()
-                .filter_map(Result::ok)
-                .fold(Vec::new(), |mut ids, batch| {
-                    batch
-                        .column_by_name("id")
-                        .expect("Unable to read 'id' column")
-                        .as_primitive::<UInt32Type>()
-                        .values()
-                        .iter()
-                        .collect_into(&mut ids)
-                        .to_owned()
-                });
-
-        // 3. Check that read data matches written data
-        assert_eq!(ids, data);
-        remove_dir_all(PATH).unwrap();
+    fn optional_coordinates() {
+        let path = tmp();
+        {
+            let mut ds = Dataset::new(&path, &XY).expect("create");
+            let integration = Time::new::<millisecond>(10.0);
+            // Push with no coordinates at all
+            ds.push(None, None, None, None, integration)
+                .expect("push none");
+            // Push with only x
+            let x = Length::new::<millimeter>(5.0);
+            ds.push(Some(x), None, None, None, integration)
+                .expect("push x");
+            ds.close().expect("close");
+        }
+        let ds = Dataset::open(&path).expect("open");
+        let ms = ds.read_measurements().expect("read");
+        assert_eq!(ms.len(), 2);
+        assert!(ms[0].x.is_none());
+        assert!(ms[0].y.is_none());
+        assert!(ms[1].x.is_some());
+        assert!((ms[1].x.unwrap() - 5.0).abs() < 1e-3);
     }
 
+    /* ----------------------------------------------------------------------------- Calibration */
+
     #[test]
-    fn finalise() {
-        const PATH: &str = "test-finalise";
-        let db = Dataset::new(PATH).unwrap();
-        let input = File::open(db.wavelengths.path).unwrap();
-        let reader = StreamReader::try_new(input, None).unwrap();
-        let schema = reader.schema();
-        let output = File::create(db.path.join("wavelengths-finalised.arrow")).unwrap();
-        let mut writer = FileWriter::try_new(output, &schema).unwrap();
-        reader
-            .into_iter()
-            .filter_map(Result::ok)
-            .for_each(|batch| writer.write(&batch).unwrap());
-        writer.finish().unwrap(); // Write the file footer
-        remove_dir_all(PATH).unwrap();
+    fn calibration_marker() {
+        let path = tmp();
+        {
+            let mut ds = Dataset::new(&path, &XY).expect("create");
+            let integration = Time::new::<millisecond>(10.0);
+            let id = ds.push(None, None, None, None, integration).expect("push");
+            ds.calibration(id);
+            ds.close().expect("close");
+        }
+        let ds = Dataset::open(&path).expect("open");
+        assert_eq!(ds.manifest().calibrations, vec![0]);
+    }
+
+    /* ----------------------------------------------------------------------------- Finish flag */
+
+    #[test]
+    fn finish_sets_flag() {
+        let path = tmp();
+        {
+            let ds = Dataset::new(&path, &XY).expect("create");
+            ds.finish().expect("finish");
+        }
+        let ds = Dataset::open(&path).expect("open");
+        assert!(ds.manifest().finished);
+    }
+
+    /* -------------------------------------------------------------------------- Units manifest */
+
+    #[test]
+    fn units_in_manifest() {
+        let path = tmp();
+        {
+            let ds = Dataset::new(&path, &XYZA).expect("create");
+            ds.close().expect("close");
+        }
+        let ds = Dataset::open(&path).expect("open");
+        assert_eq!(ds.manifest().units.x, Some(Units::Mm));
+        assert_eq!(ds.manifest().units.y, Some(Units::Mm));
+        assert_eq!(ds.manifest().units.z, Some(Units::Um));
+        assert_eq!(ds.manifest().units.a, Some(Units::Deg));
+    }
+
+    /* ---------------------------------------------------------------- Wavelength deduplication */
+
+    #[test]
+    fn wavelength_dedup() {
+        let path = tmp();
+        let mut ds = Dataset::new(&path, &XY).expect("create");
+        let ids1 = ds.push_wavelengths(&[400.0, 500.0]).expect("first push");
+        let ids2 = ds.push_wavelengths(&[400.0, 600.0]).expect("second push");
+        assert_eq!(ids1, vec![0, 1]);
+        assert_eq!(ids2, vec![0, 2]); // 400.0 reused, 600.0 is new
+    }
+
+    /* ------------------------------------------------------------------------- Commit snapshot */
+
+    #[test]
+    fn commit_writes_readable_file() {
+        let path = tmp();
+        let mut ds = Dataset::new(&path, &XY).expect("create");
+        ds.push_wavelengths(&[450.0]).expect("push wl");
+        let integration = Time::new::<millisecond>(20.0);
+        ds.push(None, None, None, None, integration).expect("push");
+        ds.commit().expect("commit");
+
+        // File should be readable mid-experiment
+        let snap = Dataset::open(&path).expect("open snapshot");
+        assert_eq!(snap.read_wavelengths().expect("read").len(), 1);
+
+        // Can still push more data after committing
+        ds.push_wavelengths(&[550.0]).expect("push more");
+        ds.close().expect("close");
+
+        let final_ds = Dataset::open(&path).expect("open final");
+        assert_eq!(final_ds.read_wavelengths().expect("read").len(), 2);
+    }
+
+    /* ------------------------------------------- Full coordinates (x, y, z, a) */
+
+    #[test]
+    fn full_coordinates() {
+        let path = tmp();
+        {
+            let mut ds = Dataset::new(&path, &XYZA).expect("create");
+            let x = Length::new::<millimeter>(1.0);
+            let y = Length::new::<millimeter>(2.0);
+            let z = Length::new::<millimeter>(0.003); // 3 µm = 0.003 mm; stored as µm
+            let a = Angle::new::<degree>(45.0);
+            let integration = Time::new::<millisecond>(100.0);
+            ds.push(Some(x), Some(y), Some(z), Some(a), integration)
+                .expect("push");
+            ds.close().expect("close");
+        }
+        let ds = Dataset::open(&path).expect("open");
+        let ms = ds.read_measurements().expect("read");
+        assert_eq!(ms.len(), 1);
+        assert!((ms[0].x.expect("x") - 1.0).abs() < 0.01);
+        assert!((ms[0].y.expect("y") - 2.0).abs() < 0.01);
+        // z is stored in µm: 0.003 mm = 3 µm
+        assert!((ms[0].z.expect("z") - 3.0).abs() < 0.01);
+        assert!((ms[0].a.expect("a") - 45.0).abs() < 0.01);
+    }
+
+    /* ------------------------------------------- Relative timestamps */
+
+    #[test]
+    fn timestamps_are_relative() {
+        let path = tmp();
+        {
+            let mut ds = Dataset::new(&path, &XY).expect("create");
+            let integration = Time::new::<millisecond>(10.0);
+            ds.push(None, None, None, None, integration).expect("push");
+            ds.close().expect("close");
+        }
+        let ds = Dataset::open(&path).expect("open");
+        let ms = ds.read_measurements().expect("read");
+        // Timestamp should be a small offset (< 1 second) from init, not a UNIX epoch
+        assert!(ms[0].timestamp < 1_000_000); // < 1 second in µs
     }
 }

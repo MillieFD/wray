@@ -1,6 +1,6 @@
 [package]
 name = "wray"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Standardised data storage for diffuse reflectance spectroscopy imaging, written in Rust."
 categories = ["science", "science::robotics", "database-implementations"]
@@ -15,15 +15,8 @@ repository = "https://github.com/MillieFD/wray"
 name = "wray"
 crate-type = ["lib"]
 
-[features]
-default = ["x", "y"]
-x = []
-y = []
-z = []
-a = []
-
 [dependencies.arrow]
-version = "57.3"
+version = "58.0"
 default-features = false
 features = ["ipc_compression"]
 
@@ -31,3 +24,58 @@ features = ["ipc_compression"]
 version = "0.38"
 default-features = false
 features = ["si", "f64"]
+
+[dependencies.toml]
+version = "1.0.7+spec-1.1.0"
+
+[dependencies.serde]
+version = "1"
+features = ["derive"]
+
+[dev-dependencies]
+tempfile = "3"
+
+# ------------------------------------------------------------------------------------------------
+
+[lints.rust]
+# Every public item must have a /// doc comment (matches rust-style skill).
+missing_docs = "warn"
+
+[lints.clippy]
+# Enable all pedantic lints as a base; selectively allow noisy ones below.
+# Pedantic covers: missing_const_for_fn, default_trait_access, map_unwrap_or,
+# needless_pass_by_value, missing_errors_doc, missing_panics_doc, and many more.
+pedantic = { level = "warn", priority = -1 }
+
+# Restriction lint: forbid .unwrap() (use ? or .expect("reason") instead).
+unwrap_used = "warn"
+
+# --- Allow: noisy pedantic lints that don't fit this codebase ---
+
+# WavelengthRecord, MeasurementRecord, etc. — name repetition is intentional.
+module_name_repetitions = "allow"
+
+# Too many false positives; #[must_use] is added explicitly where it matters.
+must_use_candidate = "allow"
+
+# Numeric casts (as u64, as f32, etc.) are deliberate in this scientific library.
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_precision_loss = "allow"
+cast_possible_wrap = "allow"
+
+# `use super::*` in test modules is the standard Rust pattern.
+wildcard_imports = "allow"
+
+# rust-style skill explicitly requires `match bool { true => …, false => … }` over if/else.
+match_bool = "allow"
+
+# `m_start` vs `ms_start` are legitimately distinct names; the lint produces false positives.
+similar_names = "allow"
+
+# `Header` fields (manifest_len, wavelengths_len, …) — the `_len` postfix is intentional.
+struct_field_names = "allow"
+
+# rust-style skill requires `Default::default()` over `TypeName::default()` — this lint
+# enforces the opposite, so we silence it.
+default_trait_access = "allow"

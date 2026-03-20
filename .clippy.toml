@@ -1,0 +1,8 @@
+# Clippy configuration values (thresholds, MSRV, etc.)
+# Lint levels (warn/allow/deny) live in Cargo.toml [lints.clippy].
+
+# Flag functions with more than 10 logical paths.
+cognitive-complexity-threshold = 10
+
+# Flag functions with more than 6 parameters (excluding self).
+too-many-arguments-threshold = 6

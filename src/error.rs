@@ -16,10 +16,19 @@ use arrow::error::ArrowError;
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
+/// Errors produced by the `wray` library.
 #[derive(Debug)]
 pub enum Error {
-    ArrowError(ArrowError),
-    IOError(std::io::Error),
+    /// Apache Arrow operation failed.
+    Arrow(ArrowError),
+    /// File-system I/O failed.
+    Io(std::io::Error),
+    /// TOML serialisation or deserialisation failed.
+    Toml(String),
+    /// A required Arrow column was not found.
+    MissingColumn(String),
+    /// The `.wray` binary layout is invalid or unsupported.
+    InvalidFormat(String),
 }
 
 /* ----------------------------------------------------------------------- Trait Implementations */
@@ -27,8 +36,11 @@ pub enum Error {
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match self {
-            Error::ArrowError(e) => write!(f, "Arrow Error: {}", e),
-            Error::IOError(e) => write!(f, "IO Error: {}", e),
+            Self::Arrow(e) => write!(f, "Arrow: {e}"),
+            Self::Io(e) => write!(f, "IO: {e}"),
+            Self::Toml(e) => write!(f, "TOML: {e}"),
+            Self::MissingColumn(c) => write!(f, "missing column: {c}"),
+            Self::InvalidFormat(msg) => write!(f, "invalid format: {msg}"),
         }
     }
 }
@@ -36,13 +48,31 @@ impl Display for Error {
 impl std::error::Error for Error {}
 
 impl From<ArrowError> for Error {
-    fn from(value: ArrowError) -> Self {
-        Error::ArrowError(value)
+    fn from(e: ArrowError) -> Self {
+        Self::Arrow(e)
     }
 }
 
 impl From<std::io::Error> for Error {
-    fn from(value: std::io::Error) -> Self {
-        Error::IOError(value)
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
+}
+
+impl From<toml::ser::Error> for Error {
+    fn from(e: toml::ser::Error) -> Self {
+        Self::Toml(e.to_string())
+    }
+}
+
+impl From<toml::de::Error> for Error {
+    fn from(e: toml::de::Error) -> Self {
+        Self::Toml(e.to_string())
+    }
+}
+
+impl From<std::str::Utf8Error> for Error {
+    fn from(e: std::str::Utf8Error) -> Self {
+        Self::InvalidFormat(e.to_string())
     }
 }

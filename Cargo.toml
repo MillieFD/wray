@@ -2,8 +2,8 @@
 name = "wray"
 version = "0.2.0"
 edition = "2024"
-description = "Standardised data storage for diffuse reflectance spectroscopy imaging, written in Rust."
-categories = ["science", "science::robotics", "database-implementations"]
+description = "Standardised data storage for optical spectroscopy, written in Rust."
+categories = ["data-structures", "science", "science::robotics", "science::bioinformatics"]
 keywords = ["database", "data-storage", "spectroscopy", "imaging", "optics"]
 license = "BSD-3-Clause"
 authors = ["Amelia Fraser-Dale"]
@@ -11,71 +11,40 @@ repository = "https://github.com/MillieFD/wray"
 
 # See a full list of keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lints.clippy]
+# Base lint profiles
+cargo = "warn"
+pedantic = "warn"
+# Specific lint options
+alloc_instead_of_core = "deny"
+allow_attributes_without_reason = "deny"
+arithmetic_side_effects = "warn"
+many_single_char_names = "allow"
+match_bool = "allow"
+missing_const_for_fn = "deny"
+mutex_atomic = "deny"
+similar_names = "allow"
+try_err = "deny"
+unwrap_used = "deny"
+wildcard_dependencies = "allow"
+
+# See a full list of keys and their definitions at https://rust-lang.github.io/rust-clippy/stable/index.html
+
 [lib]
 name = "wray"
 crate-type = ["lib"]
+
+[dependencies]
+toml = "1.0"
 
 [dependencies.arrow]
 version = "58.0"
 default-features = false
 features = ["ipc_compression"]
 
-[dependencies.uom] # TODO Remove uom dependency
-version = "0.38"
-default-features = false
-features = ["si", "f32"]
-
-[dependencies.toml]
-version = "1.0.7+spec-1.1.0"
-
 [dependencies.serde]
-version = "1"
+version = "1.0"
 features = ["derive"]
 
 [dev-dependencies]
-tempfile = "3"
-
-# ------------------------------------------------------------------------------------------------
-
-[lints.rust]
-# Every public item must have a /// doc comment (matches rust-style skill).
-missing_docs = "warn"
-
-[lints.clippy]
-# Enable all pedantic lints as a base; selectively allow noisy ones below.
-# Pedantic covers: missing_const_for_fn, default_trait_access, map_unwrap_or,
-# needless_pass_by_value, missing_errors_doc, missing_panics_doc, and many more.
-pedantic = { level = "warn", priority = -1 }
-
-# Restriction lint: forbid .unwrap() (use ? or .expect("reason") instead).
-unwrap_used = "warn"
-
-# --- Allow: noisy pedantic lints that don't fit this codebase ---
-
-# WavelengthRecord, MeasurementRecord, etc. — name repetition is intentional.
-module_name_repetitions = "allow"
-
-# Too many false positives; #[must_use] is added explicitly where it matters.
-must_use_candidate = "allow"
-
-# Numeric casts (as u64, as f32, etc.) are deliberate in this scientific library.
-cast_possible_truncation = "allow"
-cast_sign_loss = "allow"
-cast_precision_loss = "allow"
-cast_possible_wrap = "allow"
-
-# `use super::*` in test modules is the standard Rust pattern.
-wildcard_imports = "allow"
-
-# rust-style skill explicitly requires `match bool { true => …, false => … }` over if/else.
-match_bool = "allow"
-
-# `m_start` vs `ms_start` are legitimately distinct names; the lint produces false positives.
-similar_names = "allow"
-
-# `Header` fields (manifest_len, wavelengths_len, …) — the `_len` postfix is intentional.
-struct_field_names = "allow"
-
-# rust-style skill requires `Default::default()` over `TypeName::default()` — this lint
-# enforces the opposite, so we silence it.
-default_trait_access = "allow"
+tempfile = "3.27"

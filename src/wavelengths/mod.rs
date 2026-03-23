@@ -30,11 +30,6 @@ use crate::Error;
 use crate::format::Buf;
 use crate::writer::Writer;
 
-/* -------------------------------------------------------------------------------- Constants */
-
-/// Flush threshold — rows per batch.
-const SIZE: usize = 16_384;
-
 /* ------------------------------------------------------------------------------ Public Exports */
 
 /// Writer for the wavelengths table.

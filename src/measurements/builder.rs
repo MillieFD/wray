@@ -26,6 +26,9 @@ pub(super) struct Builder {
     z: Float32Builder,
     a: Float32Builder,
     integration: UInt64Builder,
+    b: Float32Builder,
+    c: Float32Builder,
+    integration: UInt32Builder,
     len: usize,
 }
 

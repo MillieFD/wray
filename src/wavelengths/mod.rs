@@ -21,8 +21,6 @@ use arrow::array::RecordBatch;
 use arrow::datatypes::DataType::{Float64, UInt16};
 use arrow::datatypes::{Field, Schema};
 use arrow::ipc::writer::StreamWriter;
-use uom::si::f32::Length;
-use uom::si::length::nanometer;
 
 use self::builder::Builder;
 use self::record::Record;

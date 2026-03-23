@@ -85,6 +85,8 @@ impl Builder {
             Arc::new(self.y.finish()),
             Arc::new(self.z.finish()),
             Arc::new(self.a.finish()),
+            Arc::new(self.b.finish()),
+            Arc::new(self.c.finish()),
             Arc::new(self.integration.finish()),
         ]
     }

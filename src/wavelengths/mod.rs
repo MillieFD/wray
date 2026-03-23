@@ -15,17 +15,18 @@ pub(super) mod record;
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, LazyLock};
 
 use arrow::array::RecordBatch;
-use arrow::datatypes::DataType::{Float64, UInt16};
-use arrow::datatypes::{Field, Schema};
+use arrow::datatypes::DataType::{Float32, UInt16};
+use arrow::datatypes::{Field, Float32Type, Schema, UInt16Type};
 use arrow::ipc::writer::StreamWriter;
 
 use self::builder::Builder;
 use self::record::Record;
 use crate::Error;
-use crate::format::Buf;
+use crate::util::col;
 use crate::writer::Writer;
 
 /* ------------------------------------------------------------------------------ Public Exports */
@@ -127,7 +128,7 @@ impl Writer for Wavelengths {
     const SCHEMA: LazyLock<Arc<Schema>> = LazyLock::new(|| {
         Arc::new(Schema::new(vec![
             Field::new("id", UInt16, false),
-            Field::new("nm", Float64, false),
+            Field::new("nm", Float32, false),
         ]))
     });
 }

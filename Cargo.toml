@@ -11,6 +11,19 @@ repository = "https://github.com/MillieFD/wray"
 
 # See a full list of keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lib]
+name = "wray"
+crate-type = ["lib"]
+
+[features]
+default = ["x", "y", "z", "a", "b", "c"]
+x = []
+y = []
+z = []
+a = []
+b = []
+c = []
+
 [lints.clippy]
 # Base lint profiles
 cargo = "warn"
@@ -29,10 +42,6 @@ unwrap_used = "deny"
 wildcard_dependencies = "allow"
 
 # See a full list of keys and their definitions at https://rust-lang.github.io/rust-clippy/stable/index.html
-
-[lib]
-name = "wray"
-crate-type = ["lib"]
 
 [dependencies]
 toml = "1.0"

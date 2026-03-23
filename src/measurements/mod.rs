@@ -49,6 +49,8 @@ pub(crate) struct Measurements {
     next_id: u32,
     epoch: i64,
     cfg: Config,
+    /// Manifest epoch in microseconds since UNIX epoch.
+    epoch: u64,
 }
 
 impl Measurements {

@@ -75,6 +75,36 @@ impl Builder {
         self.len += 1;
     }
 
+    /// Returns true if the builder is ready to be flushed.
+    ///
+    /// # Apache Arrow Chunking
+    ///
+    /// Each record batch can contain an arbitrary number of rows. When implementing the arrow
+    /// columnar format, users must decide how many rows to include in each record batch. Smaller
+    /// batches transmit with lower latency but incur more per-message overhead. Larger batches
+    /// amortise header costs and improve throughput but increase memory footprint and latency.
+    /// Arrow performance studies suggest batches in the `256 KB` to `1 MB` range. Consider
+    /// adjusting batch size to fit CPU caches (L2/L3) and balance streaming latency.
+    ///
+    /// | **Batch Size** | **Throughput (GB/s)** |
+    /// | -------------: | --------------------: |
+    /// | 16 KB | ~1.0 |
+    /// | 64 KB | ~2.0 |
+    /// | 256 KB | ~5.0 |
+    /// | 1 MB | ~7.7 |
+    /// | 16 MB | ~6.8 |
+    ///
+    /// # Optimum Batch Size
+    ///
+    /// Each row in the [`measurements`][1] table occupies 40 bytes.
+    /// Optimum batch size `~256KB` is achieved with `~6500` rows
+    ///
+    /// [1]: super::Measurements
+    pub fn is_full(&self) -> bool {
+        const MAX: usize = 6500;
+        self.len >= MAX
+    }
+
     /// Finish the current arrays and return them as columns. Resets the builder.
     pub fn columns(&mut self) -> Vec<ArrayRef> {
         self.len = 0;

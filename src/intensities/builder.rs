@@ -17,6 +17,7 @@ use arrow::array::{ArrayRef, Float64Builder, UInt16Builder, UInt32Builder};
 /* ------------------------------------------------------------------------------ Public Exports */
 
 /// Arrow record-batch builder for the intensities table.
+#[derive(Debug, Default)]
 pub(super) struct Builder {
     measurement: UInt32Builder,
     wavelength: UInt16Builder,
@@ -26,12 +27,7 @@ pub(super) struct Builder {
 
 impl Builder {
     pub fn new() -> Self {
-        Self {
-            measurement: Default::default(),
-            wavelength: Default::default(),
-            intensity: Default::default(),
-            len: 0,
-        }
+        Self::default()
     }
 
     /// Expand one measurement's wavelength/intensity vectors into rows.

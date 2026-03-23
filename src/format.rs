@@ -185,8 +185,7 @@ pub struct Manifest {
     /// Wray format version.
     pub version: u32,
     /// Absolute UNIX epoch timestamp in microseconds when the dataset was created.
-    // // TODO use u64 instead. Do not allow negative timestamp.
-    pub timestamp: i64,
+    pub timestamp: u64,
     /// Measurement IDs that are calibration measurements.
     pub calibrations: Vec<u32>,
     /// Whether the dataset has been explicitly finalised.
@@ -215,7 +214,7 @@ pub struct ManifestUnits {
 
 impl Manifest {
     /// Create a new manifest for the given creation timestamp and configuration.
-    pub(crate) fn new(timestamp: i64, cfg: &Config) -> Self {
+    pub(crate) fn new(timestamp: u64, cfg: &Config) -> Self {
         Self {
             version: VERSION,
             timestamp,

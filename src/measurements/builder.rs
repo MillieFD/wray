@@ -17,9 +17,7 @@ use arrow::array::{ArrayRef, Float32Builder, UInt32Builder, UInt64Builder};
 /* ------------------------------------------------------------------------------ Public Exports */
 
 /// Arrow record-batch builder for the measurements table.
-///
-/// All coordinate columns are nullable (`Float32`). The timestamp column
-/// stores microsecond offsets (`UInt64`) from the manifest epoch.
+#[derive(Debug, Default)]
 pub(super) struct Builder {
     id: UInt32Builder,
     timestamp: UInt64Builder,
@@ -33,16 +31,7 @@ pub(super) struct Builder {
 
 impl Builder {
     pub fn new() -> Self {
-        Self {
-            id: Default::default(),
-            timestamp: Default::default(),
-            x: Default::default(),
-            y: Default::default(),
-            z: Default::default(),
-            a: Default::default(),
-            integration: Default::default(),
-            len: 0,
-        }
+        Self::default()
     }
 
     /// Append one measurement row. Coordinates are raw `f32` values already

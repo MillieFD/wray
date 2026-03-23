@@ -8,9 +8,9 @@ Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the conditions of the LICENSE are met.
 */
 
-/* ------------------------------------------------------------------------------ Public Exports */
-
 use std::fmt::{Display, Formatter};
+
+/* ------------------------------------------------------------------------------ Public Exports */
 
 /// A single intensity entry returned by read queries.
 #[derive(Copy, Clone, Debug, Default, PartialEq, PartialOrd)]

@@ -19,16 +19,25 @@ use arrow::array::{ArrayRef, Float32Builder, UInt32Builder, UInt64Builder};
 /// Arrow record-batch builder for the measurements table.
 #[derive(Debug, Default)]
 pub(super) struct Builder {
+    /// Unique measurement identifier.
     id: UInt32Builder,
+    /// Microsecond offset from the manifest epoch.
     timestamp: UInt64Builder,
+    /// Optional X coordinate in SI base units.
     x: Float32Builder,
+    /// Optional Y coordinate in SI base units.
     y: Float32Builder,
+    /// Optional Z coordinate in SI base units.
     z: Float32Builder,
+    /// Optional A coordinate in SI base units.
     a: Float32Builder,
-    integration: UInt64Builder,
+    /// Optional B coordinate in SI base units.
     b: Float32Builder,
+    /// Optional C coordinate in SI base units.
     c: Float32Builder,
+    /// Integration time in microseconds.
     integration: UInt32Builder,
+    /// Number of measurements in the batch.
     len: usize,
 }
 

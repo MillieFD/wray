@@ -64,34 +64,20 @@ impl Wavelengths {
     /// New wavelengths are assigned sequential IDs starting after the
     /// current maximum.
     pub fn push(&mut self, wavelengths: &[f32]) -> Result<Vec<u16>, Error> {
-        const TOLERANCE: f32 = 1E-12;
-        let mut next = self
-            .records
+        let ids = wavelengths
             .iter()
-            .map(|r| r.id)
-            .max()
-            .map_or(0, |id| id + 1);
-        let mut ids = Vec::with_capacity(wavelengths.len());
-        for &wl in wavelengths {
-            let nm = Length::new::<nanometer>(wl);
-            let existing = self
-                .records
-                .iter()
-                .find(|r| (r.nm - nm).abs().get::<nanometer>() < TOLERANCE)
-                .map(|r| r.id);
-            if let Some(id) = existing {
-                ids.push(id);
-            } else {
-                let id = next;
-                next += 1;
-                self.records.push(Record::new(id, nm));
-                self.builder.push(id, nm);
-                ids.push(id);
-            }
-        }
-        if self.builder.len() >= SIZE {
-            self.flush()?;
-        }
+            .map(|&nm| match self.find(nm) {
+                Some(record) => record.id,
+                None => {
+                    let id = self.next.fetch_add(1, Ordering::SeqCst);
+                    let record = Record::new(id, nm);
+                    self.records.push(record);
+                    self.builder.push(id, nm);
+                    id
+                }
+            })
+            .collect();
+        self.try_flush()?;
         Ok(ids)
     }
 

@@ -123,6 +123,22 @@ impl Wavelengths {
     }
 }
 
+/// Extract [`Record`]s from pre-decoded [`RecordBatch`]es.
+pub(crate) fn decode(batches: &[RecordBatch]) -> Result<Vec<Record>, Error> {
+    batches.iter().try_fold(Vec::new(), |mut records, batch| {
+        let ids = col::<UInt16Type>(batch, "id")?;
+        let nms = col::<Float32Type>(batch, "nm")?;
+        for i in 0..batch.num_rows() {
+            records.push(Record {
+                // SAFETY: Index cannot be out of bounds. Columns are guaranteed non-null.
+                id: ids.value(i),
+                nm: nms.value(i),
+            });
+        }
+        Ok(records)
+    })
+}
+
 /* ----------------------------------------------------------------------- Trait Implementations */
 
 impl Writer for Wavelengths {

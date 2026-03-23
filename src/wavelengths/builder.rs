@@ -13,42 +13,35 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 use std::sync::Arc;
 
 use arrow::array::{ArrayRef, Float32Builder, UInt16Builder};
-use uom::si::f32::Length;
-use uom::si::length::nanometer;
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
 /// Arrow record-batch builder for the wavelengths table.
 pub(super) struct Builder {
-    id: UInt16Builder,
-    nm: Float32Builder,
-    len: usize,
+    ids: UInt16Builder,
+    nms: Float32Builder,
+    pub(super) len: usize,
 }
 
 impl Builder {
     pub fn new() -> Self {
         Self {
-            id: Default::default(),
-            nm: Default::default(),
-            len: 0,
+            ids: Default::default(),
+            nms: Default::default(),
+            len: Default::default(),
         }
     }
 
     /// Append a single wavelength row.
-    pub fn push(&mut self, id: u16, wavelength: Length) {
-        self.id.append_value(id);
-        self.nm.append_value(wavelength.get::<nanometer>());
+    pub fn push(&mut self, id: u16, nm: f32) {
+        self.ids.append_value(id);
+        self.nms.append_value(nm);
         self.len += 1;
-    }
-
-    /// Number of rows pending in this builder since the last [`columns`] call.
-    pub fn len(&self) -> usize {
-        self.len
     }
 
     /// Finish the current arrays and return them as columns. Resets the builder.
     pub fn columns(&mut self) -> Vec<ArrayRef> {
         self.len = 0;
-        vec![Arc::new(self.id.finish()), Arc::new(self.nm.finish())]
+        vec![Arc::new(self.ids.finish()), Arc::new(self.nms.finish())]
     }
 }

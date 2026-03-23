@@ -14,19 +14,14 @@ use std::cell::RefCell;
 use std::fmt::{Display, Formatter};
 use std::io::{self, Read, Write};
 use std::rc::Rc;
-use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
-use uom::si::angle::{degree, radian};
-use uom::si::f32::{Angle, Length};
-use uom::si::length::{meter, micrometer, millimeter, nanometer};
 
 use crate::Error;
 
 /* -------------------------------------------------------------------------------- Constants */
 
 /// Magic bytes at the start of every `.wr` file.
-// TODO Change file extension to `.wr`. Ensure file extension is always used.
 pub(crate) const MAGIC: &[u8; 4] = b"WRAY";
 
 /// Current format version.
@@ -46,100 +41,11 @@ pub(crate) const EOS: [u8; 8] = [0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00]
 /// Physical unit for a coordinate axis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-// TODO Remove UOM crate. Remove Units table from manifest. Lengths always use meters as f32. Angles always use radians as f32. Refactor Units enum to have two variants: Length or Angle.
-// TODO Remove uom dependency. Use raw f32 and f64 always with SI base units (e.g. meter or radian)
 pub enum Units {
-    /// Nanometres.
-    Nm,
-    /// Micrometres.
-    Um,
-    /// Millimetres.
-    Mm,
-    /// Metres.
-    M,
-    /// Degrees.
-    Deg,
-    /// Radians.
-    Rad,
-}
-
-impl Units {
-    /// Returns `true` for length units (nm, µm, mm, m).
-    pub fn is_length(self) -> bool {
-        matches!(self, Self::Nm | Self::Um | Self::Mm | Self::M)
-    }
-
-    /// Returns `true` for angle units (deg, rad).
-    pub fn is_angle(self) -> bool {
-        matches!(self, Self::Deg | Self::Rad)
-    }
-
-    /// Convert a [`Length`] to `f32` in this unit.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `self` is an angle unit ([`Units::Deg`] or [`Units::Rad`]).
-    pub fn length_to_f32(self, v: Length) -> f32 {
-        match self {
-            Self::Nm => v.get::<nanometer>(),
-            Self::Um => v.get::<micrometer>(),
-            Self::Mm => v.get::<millimeter>(),
-            Self::M => v.get::<meter>(),
-            _ => panic!("not a length unit"),
-        }
-    }
-
-    /// Convert an [`Angle`] to `f32` in this unit.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `self` is a length unit ([`Units::Nm`], [`Units::Um`], [`Units::Mm`], or
-    /// [`Units::M`]).
-    pub fn angle_to_f32(self, v: Angle) -> f32 {
-        match self {
-            Self::Deg => v.get::<degree>() as f32,
-            Self::Rad => v.get::<radian>() as f32,
-            _ => panic!("not an angle unit"),
-        }
-    }
-
-    /// Convert a raw `f32` stored in `self` units to the requested `target` units.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `self` and `target` are not in the same physical dimension
-    /// (e.g. converting a length unit to an angle unit).
-    pub fn convert(self, value: f32, target: Self) -> f32 {
-        match (self.is_length(), target.is_length()) {
-            (true, true) => {
-                let base = f64::from(value) * self.length_scale();
-                (base / target.length_scale()) as f32
-            }
-            (false, false) => {
-                let base = f64::from(value) * self.angle_scale();
-                (base / target.angle_scale()) as f32
-            }
-            _ => panic!("cannot convert between length and angle"),
-        }
-    }
-
-    fn length_scale(self) -> f64 {
-        match self {
-            Self::Nm => 1e-9,
-            Self::Um => 1e-6,
-            Self::Mm => 1e-3,
-            Self::M => 1.0,
-            _ => unreachable!(),
-        }
-    }
-
-    fn angle_scale(self) -> f64 {
-        match self {
-            Self::Deg => std::f64::consts::PI / 180.0,
-            Self::Rad => 1.0,
-            _ => unreachable!(),
-        }
-    }
+    /// Length in metres.
+    Length,
+    /// Angle using radians.
+    Angle,
 }
 
 /* ----------------------------------------------------------------------- Trait Implementations */
@@ -147,34 +53,35 @@ impl Units {
 impl Display for Units {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match self {
-            Self::Nm => f.write_str("nm"),
-            Self::Um => f.write_str("um"),
-            Self::Mm => f.write_str("mm"),
-            Self::M => f.write_str("m"),
-            Self::Deg => f.write_str("deg"),
-            Self::Rad => f.write_str("rad"),
+            Self::Length => f.write_str("m"),
+            Self::Angle => f.write_str("rad"),
         }
     }
 }
 
 /* ------------------------------------------------------------------------------ Configuration */
 
-/// Options for creating a new [`Dataset`](crate::Dataset).
-///
-/// Specify which coordinate axes are active and their storage units.
-/// Omit an axis to leave it unused (nullable column, all nulls).
-#[derive(Debug, Clone, Default)]
+/// Per-axis dataset configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
-    // TODO Add mem::size_of() test to ensure Option<Units> is niche optimised
-    /// Unit for the `x` coordinate axis.
+    /// Dimension for the `x` coordinate axis.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub x: Option<Units>,
-    /// Unit for the `y` coordinate axis.
+    /// Dimension for the `y` coordinate axis.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub y: Option<Units>,
-    /// Unit for the `z` coordinate axis.
+    /// Dimension for the `z` coordinate axis.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub z: Option<Units>,
-    /// Unit for the `a` coordinate axis.
+    /// Dimension for the `a` coordinate axis.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub a: Option<Units>,
-    // TODO add "b" and "c" fields (six total). Any axis can use any units (length or angle).
+    /// Dimension for the `b` coordinate axis.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub b: Option<Units>,
+    /// Dimension for the `c` coordinate axis.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub c: Option<Units>,
 }
 
 /* --------------------------------------------------------------------------------- Manifest */

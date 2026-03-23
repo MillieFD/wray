@@ -14,6 +14,7 @@ mod builder;
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::SystemTime;
 
@@ -46,9 +47,8 @@ pub(crate) struct Measurements {
     stream: StreamWriter<Buf>,
     buf: Buf,
     builder: Builder,
-    next_id: u32,
-    epoch: i64,
-    cfg: Config,
+    /// Next auto-increment measurement ID.
+    next: AtomicU32,
     /// Manifest epoch in microseconds since UNIX epoch.
     epoch: u64,
 }
@@ -70,35 +70,29 @@ impl Measurements {
 
     /// Record a new measurement. Returns the assigned measurement ID.
     ///
-    /// The timestamp is captured automatically as a microsecond offset from the
-    /// manifest epoch. Coordinates are converted to `f32` in the configured
-    /// storage unit. Passing a coordinate value when the corresponding axis
-    /// was not configured is an error.
+    /// All optional coordinate fields are feature-gated. Unneeded fields can be disabled in
+    /// `cargo.toml` for improved ergonomics. This does not change the underlying `schema`.
+    #[allow(clippy::too_many_arguments, reason = "User may require all fields")]
     pub fn push(
         &mut self,
-        x: Option<Length>,
-        y: Option<Length>,
-        z: Option<Length>,
-        a: Option<Angle>,
-        integration: Time,
+        #[cfg(feature = "x")] x: Option<f32>,
+        #[cfg(feature = "y")] y: Option<f32>,
+        #[cfg(feature = "z")] z: Option<f32>,
+        #[cfg(feature = "a")] a: Option<f32>,
+        #[cfg(feature = "b")] b: Option<f32>,
+        #[cfg(feature = "c")] c: Option<f32>,
+        integration: u32,
     ) -> Result<u32, Error> {
-        let ts = SystemTime::UNIX_EPOCH
-            .elapsed()
-            .expect("system clock after epoch")
-            .as_micros() as i64
-            - self.epoch;
-        let ts = ts as u64;
-        let id = self.next_id;
-        self.next_id += 1;
-        let x = convert_length(x, self.cfg.x, "x")?;
-        let y = convert_length(y, self.cfg.y, "y")?;
-        let z = convert_length(z, self.cfg.z, "z")?;
-        let a = convert_angle(a, self.cfg.a, "a")?;
-        let integration = integration.get::<microsecond>() as u64;
-        self.builder.push(id, ts, x, y, z, a, integration);
-        if self.builder.len() >= SIZE {
-            self.flush()?;
-        }
+        let now: u64 = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("Great scott! System clock is before the unix epoch")
+            .as_micros()
+            .try_into()
+            .expect("Microsecond timestamp exceeds u64 range");
+        let ts = now.saturating_sub(self.epoch);
+        let id = self.next.fetch_add(1, Ordering::SeqCst);
+        self.builder.push(id, ts, x, y, z, a, b, c, integration);
+        self.try_flush()?;
         Ok(id)
     }
 

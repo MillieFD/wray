@@ -48,11 +48,6 @@ impl Builder {
             });
     }
 
-    /// Number of rows pending since the last [`columns`] call.
-    pub fn len(&self) -> usize {
-        self.len
-    }
-
     /// Finish the current arrays and return them as columns. Resets the builder.
     pub fn columns(&mut self) -> Vec<ArrayRef> {
         self.len = 0;

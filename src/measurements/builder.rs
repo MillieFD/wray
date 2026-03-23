@@ -69,6 +69,8 @@ impl Builder {
         self.y.append_option(y);
         self.z.append_option(z);
         self.a.append_option(a);
+        self.b.append_option(b);
+        self.c.append_option(c);
         self.integration.append_value(integration);
         self.len += 1;
     }

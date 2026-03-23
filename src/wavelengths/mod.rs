@@ -44,14 +44,17 @@ pub(crate) struct Wavelengths {
 
 impl Wavelengths {
     /// Create a new, empty wavelengths table.
-    pub fn new() -> Result<Self, Error> {
-        let buf = Buf::new();
-        let stream = Self::new_stream_writer(buf.clone())?;
+    pub fn new(records: Vec<Record>) -> Result<Self, Error> {
         Ok(Self {
-            stream,
-            buf,
+            stream: Self::new_stream_writer()?,
             builder: Builder::new(),
-            records: Vec::new(),
+            next: records
+                .iter()
+                .map(|r| r.id)
+                .max()
+                .map_or(0, |id| id + 1)
+                .into(),
+            records,
         })
     }
 

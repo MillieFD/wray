@@ -46,18 +46,22 @@ impl Builder {
         Self::default()
     }
 
-    /// Append one measurement row. Coordinates are raw `f32` values already
-    /// converted to the correct storage unit by the caller.
-    #[allow(clippy::too_many_arguments)]
+    /// Append one measurement row.
+    ///
+    /// All optional coordinate fields are feature-gated. Unneeded fields can be disabled in
+    /// `cargo.toml` for improved ergonomics. This does not change the underlying `schema`.
+    #[allow(clippy::too_many_arguments, reason = "User may require all fields")]
     pub fn push(
         &mut self,
         id: u32,
         timestamp: u64,
-        x: Option<f32>,
-        y: Option<f32>,
-        z: Option<f32>,
-        a: Option<f32>,
-        integration: u64,
+        #[cfg(feature = "x")] x: Option<f32>,
+        #[cfg(feature = "y")] y: Option<f32>,
+        #[cfg(feature = "z")] z: Option<f32>,
+        #[cfg(feature = "a")] a: Option<f32>,
+        #[cfg(feature = "b")] b: Option<f32>,
+        #[cfg(feature = "c")] c: Option<f32>,
+        integration: u32,
     ) {
         self.id.append_value(id);
         self.timestamp.append_value(timestamp);

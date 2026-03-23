@@ -11,7 +11,7 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 /* ----------------------------------------------------------------------------- Private Modules */
 
 mod builder;
-mod record;
+pub(super) mod record;
 
 /* ----------------------------------------------------------------------------- Private Imports */
 

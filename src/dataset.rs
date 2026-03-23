@@ -67,10 +67,12 @@ impl Dataset {
     ///
     /// Panics if the system clock is set before the UNIX epoch.
     pub fn new(path: impl AsRef<Path>, cfg: &Config) -> Result<Self, Error> {
-        let timestamp = SystemTime::UNIX_EPOCH
-            .elapsed()
-            .expect("System clock is set before the UNIX epoch")
-            .as_micros() as i64; // TODO use u64 instead. Panic if timestamp is negative.
+        let timestamp: u64 = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("Great scott! System clock is before the unix epoch")
+            .as_micros()
+            .try_into()
+            .expect("Microsecond timestamp exceeds u64 range");
         Ok(Self {
             path: path.as_ref().to_path_buf(),
             manifest: Manifest::new(timestamp, cfg),

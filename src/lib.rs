@@ -46,7 +46,7 @@ mod error;
 mod format;
 mod intensities;
 mod measurements;
-mod records;
+mod util;
 mod wavelengths;
 mod writer;
 

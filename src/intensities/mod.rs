@@ -24,7 +24,6 @@ use arrow::ipc::writer::StreamWriter;
 
 use self::builder::Builder;
 use crate::Error;
-use crate::format::Buf;
 use crate::writer::Writer;
 
 /* -------------------------------------------------------------------------------- Constants */

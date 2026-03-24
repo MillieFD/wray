@@ -64,10 +64,6 @@ mod tests {
     use std::path::PathBuf;
 
     use tempfile::NamedTempFile;
-    use uom::si::angle::degree;
-    use uom::si::f32::{Angle, Length, Time};
-    use uom::si::length::millimeter;
-    use uom::si::time::millisecond;
 
     use super::*;
 

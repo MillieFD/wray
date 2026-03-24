@@ -161,6 +161,8 @@ impl Writer for Measurements {
             Field::new("y", Float32, true),
             Field::new("z", Float32, true),
             Field::new("a", Float32, true),
+            Field::new("b", Float32, true),
+            Field::new("c", Float32, true),
             Field::new("integration", UInt64, false),
         ]))
     });

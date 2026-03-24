@@ -23,8 +23,6 @@ use arrow::array::RecordBatch;
 use arrow::datatypes::DataType::{Float32, UInt32, UInt64};
 use arrow::datatypes::{Field, Schema};
 use arrow::ipc::writer::StreamWriter;
-use uom::si::f32::{Angle, Length, Time};
-use uom::si::time::microsecond;
 
 use self::builder::Builder;
 use crate::format::{Buf, Units};

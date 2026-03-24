@@ -26,12 +26,7 @@ use arrow::ipc::writer::StreamWriter;
 
 use self::builder::Builder;
 use crate::writer::Writer;
-use crate::{Config, Error};
-
-/* -------------------------------------------------------------------------------- Constants */
-
-/// Flush threshold — rows per batch.
-const SIZE: usize = 8_192;
+use crate::Error;
 
 /* ------------------------------------------------------------------------------ Public Exports */
 

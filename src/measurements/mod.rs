@@ -136,20 +136,6 @@ fn convert_length(
     }
 }
 
-fn convert_angle(
-    val: Option<Angle>,
-    unit: Option<Units>,
-    name: &str,
-) -> Result<Option<f32>, Error> {
-    match (val, unit) {
-        (Some(v), Some(u)) => Ok(Some(u.angle_to_f32(v))),
-        (None, _) => Ok(None),
-        (Some(_), None) => Err(Error::InvalidFormat(format!(
-            "{name} value provided but unit not configured"
-        ))),
-    }
-}
-
 /* ----------------------------------------------------------------------- Trait Implementations */
 
 impl Writer for Measurements {

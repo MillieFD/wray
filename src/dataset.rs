@@ -229,6 +229,19 @@ impl Dataset {
         Ok(())
     }
 
+    /// Finalise to a **new** file at `path`, leaving the original unchanged.
+    ///
+    /// The original file remains unfinished and appendable. The new file
+    /// contains all data consolidated into Arrow IPC file format.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] if the IPC streams cannot be finalised or the file
+    /// cannot be written.
+    pub fn finish_to(&mut self, path: impl AsRef<Path>) -> Result<(), Error> {
+        self.write_finished(path.as_ref(), false)
+    }
+
     /// Write a snapshot of the current data to disk without consuming `self`.
     ///
     /// Useful for long-running experiments that need periodic durability.

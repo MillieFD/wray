@@ -82,11 +82,39 @@ impl Wavelengths {
         Ok(ids)
     }
 
-    /// Flush pending rows from the builder into the IPC stream.
-    pub fn flush(&mut self) -> Result<(), Error> {
-        if self.builder.len() == 0 {
-            return Ok(());
+    /// Searches for an existing [`Record`] within a constant wavelength tolerance.
+    ///
+    /// Returns [`Some`] if a matching record is found, else returns [`None`].
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// match wavelengths.find(50f32) {
+    ///     Some(record) => println!("Matching record found: {:?}", record),
+    ///     None => println!("No matching record found."),
+    /// }
+    /// ```
+    fn find(&self, nm: f32) -> Option<&Record> {
+        const TOLERANCE: f32 = 1E-10; // 100 picometers
+        self.records.iter().find(|r| (r.nm - nm).abs() < TOLERANCE)
+    }
+
+    /// Flush pending rows from the [`Builder`] into the [`IPC stream`][1] if the builder exceeds a
+    /// constant threshold size, else no-op.
+    ///
+    /// [1]: StreamWriter
+    pub fn try_flush(&mut self) -> Result<(), Error> {
+        // TODO Would it be more performant to use an arrow buffered stream writer?
+        match self.builder.is_full() {
+            true => self.flush(),
+            false => Ok(()),
         }
+    }
+
+    /// Flush pending rows from the [`Builder`] into the [`IPC stream`][1]
+    ///
+    /// [1]: StreamWriter
+    pub fn flush(&mut self) -> Result<(), Error> {
         let columns = self.builder.columns();
         let batch = RecordBatch::try_new(Self::schema(), columns)?;
         self.stream.write(&batch)?;

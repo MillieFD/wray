@@ -11,6 +11,7 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 /* ----------------------------------------------------------------------------- Private Modules */
 
 mod builder;
+pub(crate) mod record;
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
@@ -18,40 +19,30 @@ use std::sync::{Arc, LazyLock};
 
 use arrow::array::RecordBatch;
 use arrow::datatypes::DataType::{Float64, UInt16, UInt32};
-use arrow::datatypes::{Field, Schema};
-use arrow::ipc::writer::StreamWriter;
+use arrow::datatypes::{Field, Float64Type, Schema, UInt16Type, UInt32Type};
 
 use self::builder::Builder;
+use self::record::Record;
 use crate::Error;
-use crate::format::Buf;
-use crate::writer::Writer;
-
-/* -------------------------------------------------------------------------------- Constants */
-
-/// Flush threshold — rows per batch.
-const SIZE: usize = 32_768;
+use crate::util::col;
+use crate::writer::{Ipc, Writer};
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
 /// Writer for the intensities table.
 ///
 /// Each row maps a `(measurement, wavelength)` pair to an intensity value.
-/// Rows are auto-flushed to the in-memory IPC stream every [`SIZE`] rows.
-pub(crate) struct Intensities {
-    stream: StreamWriter<Buf>,
-    buf: Buf,
-    builder: Builder,
+/// Rows are auto-flushed to the in-memory IPC stream every 32 768 rows.
+pub struct Intensities {
+    /// Shared IPC stream + builder.
+    ipc: Ipc<Builder>,
 }
 
 impl Intensities {
     /// Create a new, empty intensities table.
     pub fn new() -> Result<Self, Error> {
-        let buf = Buf::new();
-        let stream = Self::new_stream_writer(buf.clone())?;
         Ok(Self {
-            stream,
-            buf,
-            builder: Builder::new(),
+            ipc: Ipc::new(Self::new_stream()?, Self::schema(), Builder::default()),
         })
     }
 
@@ -65,35 +56,40 @@ impl Intensities {
         wavelengths: &[u16],
         intensities: &[f64],
     ) -> Result<(), Error> {
-        self.builder.push(measurement, wavelengths, intensities);
-        if self.builder.len() >= SIZE {
-            self.flush()?;
-        }
-        Ok(())
+        self.ipc.builder.push(measurement, wavelengths, intensities);
+        self.ipc.try_flush()
     }
 
-    /// Flush pending rows from the builder into the IPC stream.
-    pub fn flush(&mut self) -> Result<(), Error> {
-        if self.builder.len() == 0 {
-            return Ok(());
-        }
-        let columns = self.builder.columns();
-        let batch = RecordBatch::try_new(Self::schema(), columns)?;
-        self.stream.write(&batch)?;
-        Ok(())
+    /// Flush builder, finish stream, and extract the serialised bytes.
+    pub fn take_bytes(&mut self) -> Result<Vec<u8>, Error> {
+        self.ipc.take_bytes()
     }
 
-    /// Write the Arrow IPC EOS sentinel.
-    pub fn finish(&mut self) -> Result<(), Error> {
-        self.flush()?;
-        self.stream.finish()?;
+    /// Discard the current stream and start a fresh one.
+    pub fn reset(&mut self) -> Result<(), Error> {
+        self.ipc.reset(Self::new_stream()?);
         Ok(())
     }
+}
 
-    /// Snapshot the current IPC bytes (without EOS).
-    pub fn bytes(&self) -> Vec<u8> {
-        self.buf.bytes()
+/* ---------------------------------------------------------------------------- Read Functions */
+
+/// Extract [`Record`]s from pre-decoded [`RecordBatch`]es.
+pub(crate) fn decode(batches: &[RecordBatch]) -> Result<Vec<Record>, Error> {
+    let mut out = Vec::new();
+    for batch in batches {
+        let ms = col::<UInt32Type>(batch, "measurement")?;
+        let wls = col::<UInt16Type>(batch, "wavelength")?;
+        let vals = col::<Float64Type>(batch, "intensity")?;
+        (0..batch.num_rows()).for_each(|i| {
+            out.push(Record {
+                measurement: ms.value(i),
+                wavelength: wls.value(i),
+                intensity: vals.value(i),
+            });
+        });
     }
+    Ok(out)
 }
 
 /* ----------------------------------------------------------------------- Trait Implementations */

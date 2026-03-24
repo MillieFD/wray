@@ -14,22 +14,23 @@ use std::sync::Arc;
 
 use arrow::array::{ArrayRef, Float32Builder, UInt16Builder};
 
+use crate::writer::Build;
+
 /* ------------------------------------------------------------------------------ Public Exports */
 
 /// Arrow record-batch builder for the wavelengths table.
 pub(super) struct Builder {
+    /// Wavelength identifiers.
     ids: UInt16Builder,
+    /// Wavelength values in nanometres.
     nms: Float32Builder,
-    pub(super) len: usize,
+    /// Number of pending rows.
+    len: usize,
 }
 
 impl Builder {
     pub fn new() -> Self {
-        Self {
-            ids: Default::default(),
-            nms: Default::default(),
-            len: Default::default(),
-        }
+        Self { ids: Default::default(), nms: Default::default(), len: 0 }
     }
 
     /// Append a single wavelength row.
@@ -38,32 +39,21 @@ impl Builder {
         self.nms.append_value(nm);
         self.len += 1;
     }
+}
 
-    /// Returns true if the builder is ready to be flushed.
-    ///
-    /// # Apache Arrow Chunking
-    ///
-    /// Each record batch can contain an arbitrary number of rows. When implementing the arrow
-    /// columnar format, users must decide how many rows to include in each record batch. Smaller
-    /// batches transmit with lower latency but incur more per-message overhead. Larger batches
-    /// amortise header costs and improve throughput but increase memory footprint and latency.
-    /// Arrow performance studies suggest batches in the `256 KB` to `1 MB` range. Consider
-    /// adjusting batch size to fit CPU caches (L2/L3) and balance streaming latency.
-    ///
-    /// | **Batch Size** | **Throughput (GB/s)** |
-    /// | -------------: | --------------------: |
-    /// | 16 KB | ~1.0 |
-    /// | 64 KB | ~2.0 |
-    /// | 256 KB | ~5.0 |
-    /// | 1 MB | ~7.7 |
-    /// | 16 MB | ~6.8 |
-    pub fn is_full(&self) -> bool {
-        const SIZE: usize = 256 * 1024 / size_of::<u16>() + size_of::<f32>();
-        self.len >= SIZE
+/* ----------------------------------------------------------------------- Trait Implementations */
+
+impl Build for Builder {
+    fn len(&self) -> usize {
+        self.len
     }
 
-    /// Finish the current arrays and return them as columns. Resets the builder.
-    pub fn columns(&mut self) -> Vec<ArrayRef> {
+    fn is_full(&self) -> bool {
+        const MAX: usize = 256 * 1024 / (size_of::<u16>() + size_of::<f32>());
+        self.len >= MAX
+    }
+
+    fn columns(&mut self) -> Vec<ArrayRef> {
         self.len = 0;
         vec![Arc::new(self.ids.finish()), Arc::new(self.nms.finish())]
     }

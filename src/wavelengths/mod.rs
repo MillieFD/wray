@@ -21,104 +21,87 @@ use std::sync::{Arc, LazyLock};
 use arrow::array::RecordBatch;
 use arrow::datatypes::DataType::{Float32, UInt16};
 use arrow::datatypes::{Field, Float32Type, Schema, UInt16Type};
-use arrow::ipc::writer::StreamWriter;
 
 use self::builder::Builder;
 use self::record::Record;
 use crate::Error;
 use crate::util::col;
-use crate::writer::Writer;
+use crate::writer::{Ipc, Writer};
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
 /// Writer for the wavelengths table.
 ///
-/// Maintains an in-memory cache of all wavelength records for deduplication
-/// without disk reads. New wavelengths are accumulated in an Arrow builder
-/// and auto-flushed to the in-memory IPC stream every [`SIZE`] rows.
-pub(crate) struct Wavelengths {
-    stream: StreamWriter<Buf>,
-    buf: Buf,
-    builder: Builder,
+/// Maintains an in-memory cache of all wavelength records for deduplication.
+/// New wavelengths are accumulated in an Arrow builder and auto-flushed to
+/// the in-memory IPC stream when the builder is full.
+pub struct Wavelengths {
+    /// Shared IPC stream + builder.
+    ipc: Ipc<Builder>,
+    /// Next auto-increment wavelength ID.
+    next: AtomicU16,
+    /// In-memory dedup cache.
     records: Vec<Record>,
 }
 
 impl Wavelengths {
-    /// Create a new, empty wavelengths table.
+    /// Create a new wavelengths table, optionally pre-populated with existing records.
     pub fn new(records: Vec<Record>) -> Result<Self, Error> {
+        let next = records.iter().map(|r| r.id).max().map_or(0, |id| id + 1);
         Ok(Self {
-            stream: Self::new_stream_writer()?,
-            builder: Builder::new(),
-            next: records
-                .iter()
-                .map(|r| r.id)
-                .max()
-                .map_or(0, |id| id + 1)
-                .into(),
+            ipc: Ipc::new(Self::new_stream()?, Self::schema(), Builder::new()),
+            next: AtomicU16::new(next),
             records,
         })
     }
 
     /// Insert wavelengths (in nanometres), returning their `u16` IDs.
     ///
-    /// Duplicate wavelengths (within `TOLERANCE` nm) reuse existing IDs.
-    /// New wavelengths are assigned sequential IDs starting after the
-    /// current maximum.
+    /// Duplicate wavelengths (within tolerance) reuse existing IDs.
     pub fn push(&mut self, wavelengths: &[f32]) -> Result<Vec<u16>, Error> {
         let ids = wavelengths
             .iter()
             .map(|&nm| match self.find(nm) {
-                Some(record) => record.id,
+                Some(r) => r.id,
                 None => {
                     let id = self.next.fetch_add(1, Ordering::SeqCst);
-                    let record = Record::new(id, nm);
-                    self.records.push(record);
-                    self.builder.push(id, nm);
+                    self.records.push(Record::new(id, nm));
+                    self.ipc.builder.push(id, nm);
                     id
                 }
             })
             .collect();
-        self.try_flush()?;
+        self.ipc.try_flush()?;
         Ok(ids)
     }
 
-    /// Flush pending rows from the builder into the IPC stream.
-    pub fn flush(&mut self) -> Result<(), Error> {
-        if self.builder.len() == 0 {
-            return Ok(());
-        }
-        let columns = self.builder.columns();
-        let batch = RecordBatch::try_new(Self::schema(), columns)?;
-        self.stream.write(&batch)?;
+    /// Flush builder, finish stream, and extract the serialised bytes.
+    pub fn take_bytes(&mut self) -> Result<Vec<u8>, Error> {
+        self.ipc.take_bytes()
+    }
+
+    /// Discard the current stream and start a fresh one.
+    pub fn reset(&mut self) -> Result<(), Error> {
+        self.ipc.reset(Self::new_stream()?);
         Ok(())
     }
 
-    /// Write the Arrow IPC EOS sentinel.
-    pub fn finish(&mut self) -> Result<(), Error> {
-        self.flush()?;
-        self.stream.finish()?;
-        Ok(())
-    }
-
-    /// Snapshot the current IPC bytes (without EOS).
-    pub fn bytes(&self) -> Vec<u8> {
-        self.buf.bytes()
+    /// Search for an existing [`Record`] within a constant wavelength tolerance.
+    fn find(&self, nm: f32) -> Option<&Record> {
+        const TOLERANCE: f32 = 1E-10;
+        self.records.iter().find(|r| (r.nm - nm).abs() < TOLERANCE)
     }
 }
 
+/* ---------------------------------------------------------------------------- Read Functions */
+
 /// Extract [`Record`]s from pre-decoded [`RecordBatch`]es.
 pub(crate) fn decode(batches: &[RecordBatch]) -> Result<Vec<Record>, Error> {
-    batches.iter().try_fold(Vec::new(), |mut records, batch| {
+    batches.iter().try_fold(Vec::new(), |mut out, batch| {
         let ids = col::<UInt16Type>(batch, "id")?;
         let nms = col::<Float32Type>(batch, "nm")?;
-        for i in 0..batch.num_rows() {
-            records.push(Record {
-                // SAFETY: Index cannot be out of bounds. Columns are guaranteed non-null.
-                id: ids.value(i),
-                nm: nms.value(i),
-            });
-        }
-        Ok(records)
+        (0..batch.num_rows()).for_each(|i| out.push(Record::new(ids.value(i), nms.value(i))));
+        Ok(out)
     })
 }
 

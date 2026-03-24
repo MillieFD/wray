@@ -14,22 +14,24 @@ use std::sync::Arc;
 
 use arrow::array::{ArrayRef, Float64Builder, UInt16Builder, UInt32Builder};
 
+use crate::writer::Build;
+
 /* ------------------------------------------------------------------------------ Public Exports */
 
 /// Arrow record-batch builder for the intensities table.
 #[derive(Debug, Default)]
 pub(super) struct Builder {
+    /// Measurement foreign key.
     measurement: UInt32Builder,
+    /// Wavelength foreign key.
     wavelength: UInt16Builder,
+    /// Spectral intensity value.
     intensity: Float64Builder,
+    /// Number of pending rows.
     len: usize,
 }
 
 impl Builder {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Expand one measurement's wavelength/intensity vectors into rows.
     pub fn push(&mut self, measurement: u32, wavelengths: &[u16], intensities: &[f64]) {
         wavelengths
@@ -43,9 +45,21 @@ impl Builder {
                 self.len += 1;
             });
     }
+}
 
-    /// Finish the current arrays and return them as columns. Resets the builder.
-    pub fn columns(&mut self) -> Vec<ArrayRef> {
+/* ----------------------------------------------------------------------- Trait Implementations */
+
+impl Build for Builder {
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    fn is_full(&self) -> bool {
+        const MAX: usize = 32_768;
+        self.len >= MAX
+    }
+
+    fn columns(&mut self) -> Vec<ArrayRef> {
         self.len = 0;
         vec![
             Arc::new(self.measurement.finish()),

@@ -8,88 +8,66 @@ Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the conditions of the LICENSE are met.
 */
 
-use std::io::Cursor;
+/* ----------------------------------------------------------------------------- Private Imports */
+
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use arrow::array::{Array, ArrowPrimitiveType, AsArray, PrimitiveArray, RecordBatch};
-use arrow::datatypes::{Float32Type, Float64Type, UInt16Type, UInt32Type, UInt64Type};
-use arrow::ipc::reader::StreamReader;
-use uom::si::f32::{Angle, Length, Time};
-
-use crate::format::{Config, EOS, HEADER, Header};
+use crate::format::{Config, HEADER, Header, Manifest, Segment, Table};
 use crate::intensities::Intensities;
 use crate::measurements::Measurements;
+use crate::util::batches;
 use crate::wavelengths::Wavelengths;
-use crate::{
-    Error,
-    IntensityRecord,
-    Manifest,
-    MeasurementRecord,
-    WavelengthRecord,
-    intensities,
-    measurements,
-    wavelengths,
-};
+use crate::writer::Writer;
+use crate::{Error, Intensity, Measurement, Wavelength, intensities, measurements, wavelengths};
 
-/// A `.wr` dataset for storing spatially located optical spectroscopy data.
+/* ------------------------------------------------------------------------------ Public Exports */
+
+/// A `.wr` dataset for storing optical spectroscopy data with optional metadata.
 ///
-/// Create a new dataset with [`Dataset::new`], push data with the various
-/// `push_*` methods, and finalise with [`Dataset::close`] or
-/// [`Dataset::finish`]. The dataset is also written on [`Drop`].
-///
-/// Open an existing file for reading with [`Dataset::open`].
+/// Use [`Dataset::new`] to create or open a dataset, push data via the table
+/// accessor methods, and finalise with [`Dataset::close`] or [`Dataset::finish`].
+/// The dataset is also written on [`Drop`].
 pub struct Dataset {
+    /// File path.
     path: PathBuf,
+    /// Experiment metadata.
     manifest: Manifest,
-    // TODO wavelengths, measurements, and intensities tables are not optional in the schema. Explain why they are options here.
+    /// Wavelengths writer (`None` when read-only or closed).
     wavelengths: Option<Wavelengths>,
+    /// Measurements writer (`None` when read-only or closed).
     measurements: Option<Measurements>,
+    /// Intensities writer (`None` when read-only or closed).
     intensities: Option<Intensities>,
-    /// Raw IPC bytes for each section (populated by [`Dataset::open`] or after close).
-    wl_bytes: Vec<u8>,
-    ms_bytes: Vec<u8>,
-    it_bytes: Vec<u8>,
+    /// Complete file data for segment reads.
+    file_data: Vec<u8>,
+    /// Whether the file uses finished (Arrow file) format.
+    finished: bool,
+    /// Whether the dataset has been written and closed.
     closed: bool,
 }
 
 impl Dataset {
-    /// Create a new `.wr` dataset at `path`.
+    /// Create or open a dataset at `path`.
     ///
-    /// The file is not written to disk until [`close`](Self::close),
-    /// [`finish`](Self::finish), [`commit`](Self::commit), or [`Drop`].
+    /// If the file exists, it is opened (writable if unfinished, read-only if
+    /// finished). Otherwise a new file is created with the given [`Config`].
     ///
     /// # Errors
     ///
-    /// Returns [`Error`] if the Arrow IPC stream writers cannot be initialised.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the system clock is set before the UNIX epoch.
+    /// Returns [`Error`] if the file cannot be read or written, or if the
+    /// Arrow IPC stream writers cannot be initialised.
     pub fn new(path: impl AsRef<Path>, cfg: &Config) -> Result<Self, Error> {
-        let timestamp: u64 = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("Great scott! System clock is before the unix epoch")
-            .as_micros()
-            .try_into()
-            .expect("Microsecond timestamp exceeds u64 range");
-        Ok(Self {
-            path: path.as_ref().to_path_buf(),
-            manifest: Manifest::new(timestamp, cfg),
-            wavelengths: Some(Wavelengths::new()?),
-            measurements: Some(Measurements::new(timestamp, cfg)?),
-            intensities: Some(Intensities::new()?),
-            wl_bytes: Vec::new(),
-            ms_bytes: Vec::new(),
-            it_bytes: Vec::new(),
-            closed: false,
-        })
+        match path.as_ref().exists() {
+            true => Self::open(path),
+            false => Self::create(path, cfg),
+        }
     }
 
-    /// Open an existing `.wr` file for reading.
+    /// Open an existing `.wr` file.
     ///
-    /// Validates the magic bytes and format version, parses the manifest,
-    /// and stores the raw Arrow IPC sections for query access.
+    /// Unfinished files are opened for appending (wavelength dedup cache and
+    /// measurement ID sequence are restored). Finished files are read-only.
     ///
     /// # Errors
     ///
@@ -98,359 +76,278 @@ impl Dataset {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
         let data = std::fs::read(path.as_ref())?;
         let header = Header::read(&mut &data[..])?;
-        let m_start = HEADER;
+        let m_start = header.manifest_offset as usize;
         let m_end = m_start + header.manifest_len as usize;
         let manifest: Manifest = toml::from_str(std::str::from_utf8(&data[m_start..m_end])?)?;
-        let wl_start = m_end;
-        let wl_end = wl_start + header.wavelengths_len as usize;
-        let ms_start = wl_end;
-        let ms_end = ms_start + header.measurements_len as usize;
-        let it_start = ms_end;
-        let it_end = it_start + header.intensities_len as usize;
+
+        if header.finished {
+            return Ok(Self {
+                path: path.as_ref().to_path_buf(),
+                manifest,
+                wavelengths: None,
+                measurements: None,
+                intensities: None,
+                file_data: data,
+                finished: true,
+                closed: true,
+            });
+        }
+
+        // Restore wavelength dedup cache from existing segments.
+        let mut wl_batches = Vec::new();
+        for stream in segment_streams(&data, &manifest.segments, Table::Wavelengths) {
+            wl_batches.extend(batches(&stream)?);
+        }
+        let existing_wl = wavelengths::decode(&wl_batches)?;
+
+        // Restore next measurement ID from existing segments.
+        let mut ms_batches = Vec::new();
+        for stream in segment_streams(&data, &manifest.segments, Table::Measurements) {
+            ms_batches.extend(batches(&stream)?);
+        }
+        let existing_ms = measurements::decode(&ms_batches)?;
+        let next_ms = existing_ms.iter().map(|r| r.id).max().map_or(0, |id| id + 1);
+
         Ok(Self {
             path: path.as_ref().to_path_buf(),
+            wavelengths: Some(Wavelengths::new(existing_wl)?),
+            measurements: Some(Measurements::new(manifest.timestamp, next_ms)?),
+            intensities: Some(Intensities::new()?),
             manifest,
-            wavelengths: None,
-            measurements: None,
-            intensities: None,
-            wl_bytes: data[wl_start..wl_end].to_vec(),
-            ms_bytes: data[ms_start..ms_end].to_vec(),
-            it_bytes: data[it_start..it_end].to_vec(),
-            closed: true,
+            file_data: data,
+            finished: false,
+            closed: false,
         })
     }
 
-    /* -------------------------------------------------------------------------------- Push API */
+    /* ----------------------------------------------------------------------- Table Accessors */
 
-    /// Insert wavelengths (in nanometres) and return their `u16` IDs.
-    ///
-    /// Duplicate wavelengths are deduplicated with 1 × 10⁻¹² nm tolerance.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error`] if the Arrow builder cannot flush to the IPC stream.
+    /// Mutable access to the wavelengths table writer.
     ///
     /// # Panics
     ///
-    /// Panics if the dataset was opened read-only (via [`open`](Self::open)).
-    // TODO Move all push functions into respective modules e.g. self.wavelengths.push
-    pub fn push_wavelengths(&mut self, wavelengths: &[f32]) -> Result<Vec<u16>, Error> {
-        self.wavelengths
-            .as_mut()
-            .expect("dataset open for writing")
-            .push(wavelengths)
+    /// Panics if the dataset is not open for writing.
+    pub fn wavelengths(&mut self) -> &mut Wavelengths {
+        self.wavelengths.as_mut().expect("dataset open for writing")
     }
 
-    /// Record a new measurement. Returns the assigned `u32` ID.
-    ///
-    /// The timestamp is captured automatically. Pass `None` for unused
-    /// coordinate axes.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error`] if the Arrow builder cannot flush to the IPC stream.
+    /// Mutable access to the measurements table writer.
     ///
     /// # Panics
     ///
-    /// Panics if the dataset was opened read-only (via [`open`](Self::open)).
-    pub fn push(
-        &mut self,
-        x: Option<Length>,
-        y: Option<Length>,
-        z: Option<Length>,
-        a: Option<Angle>,
-        integration: Time,
-    ) -> Result<u32, Error> {
-        self.measurements
-            .as_mut()
-            .expect("dataset open for writing")
-            .push(x, y, z, a, integration)
+    /// Panics if the dataset is not open for writing.
+    pub fn measurements(&mut self) -> &mut Measurements {
+        self.measurements.as_mut().expect("dataset open for writing")
     }
 
-    /// Record intensity values for a single measurement.
-    ///
-    /// `wavelengths` and `intensities` must have the same length.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error`] if the Arrow builder cannot flush to the IPC stream.
+    /// Mutable access to the intensities table writer.
     ///
     /// # Panics
     ///
-    /// Panics if the dataset was opened read-only (via [`open`](Self::open)).
-    pub fn push_intensities(
-        &mut self,
-        measurement: u32,
-        wavelengths: &[u16],
-        intensities: &[f64],
-    ) -> Result<(), Error> {
-        self.intensities
-            .as_mut()
-            .expect("dataset open for writing")
-            .push(measurement, wavelengths, intensities)
+    /// Panics if the dataset is not open for writing.
+    pub fn intensities(&mut self) -> &mut Intensities {
+        self.intensities.as_mut().expect("dataset open for writing")
     }
 
-    /* ----------------------------------------------------------------- Calibrations */
+    /* --------------------------------------------------------------------------- Metadata */
 
     /// Mark a measurement ID as a calibration measurement.
     pub fn calibration(&mut self, id: u32) {
         self.manifest.calibrations.push(id);
     }
 
-    /* ----------------------------------------------------------------- Lifecycle */
+    /// Borrow the manifest metadata.
+    pub const fn manifest(&self) -> &Manifest {
+        &self.manifest
+    }
 
-    /// Flush all pending data and write the `.wr` file to disk.
-    ///
-    /// Consumes `self`. Use this when you need to handle write errors.
-    /// The manifest `finished` flag remains `false`, allowing the file
-    /// to be reopened for appending.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error`] if the IPC streams cannot be finalised or the file cannot be written.
+    /// Whether the dataset has been finalised via [`finish`](Self::finish).
+    pub const fn is_finished(&self) -> bool {
+        self.finished
+    }
+
+    /* ------------------------------------------------------------------------------ Read */
+
+    /// Read all wavelength records from the dataset.
+    pub fn read_wavelengths(&self) -> Result<Vec<Wavelength>, Error> {
+        wavelengths::decode(&self.read_batches(Table::Wavelengths)?)
+    }
+
+    /// Read all measurement records from the dataset.
+    pub fn read_measurements(&self) -> Result<Vec<Measurement>, Error> {
+        measurements::decode(&self.read_batches(Table::Measurements)?)
+    }
+
+    /// Read all intensity records from the dataset.
+    pub fn read_intensities(&self) -> Result<Vec<Intensity>, Error> {
+        intensities::decode(&self.read_batches(Table::Intensities)?)
+    }
+
+    /* ----------------------------------------------------------------------------- Write */
+
+    /// Flush and write the `.wr` file to disk. Sets `closed = true`.
     pub fn close(mut self) -> Result<(), Error> {
         self.write_to_disk()?;
         self.closed = true;
         Ok(())
     }
 
-    /// Finalise and write the `.wray` file to disk.
-    ///
-    /// Like [`close`](Self::close) but sets `manifest.finished = true`,
-    /// signalling that no more data will be appended.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error`] if the IPC streams cannot be finalised or the file cannot be written.
+    /// Consolidate into Arrow IPC **file** format, seal, and write to disk.
     pub fn finish(mut self) -> Result<(), Error> {
-        self.manifest.finished = true;
-        self.write_to_disk()?;
+        self.write_segmented()?;
+        self.write_finished(&self.path.clone())?;
         self.closed = true;
         Ok(())
     }
 
-    /// Write a snapshot of the current data to disk without consuming `self`.
-    ///
-    /// Useful for long-running experiments that need periodic durability.
-    /// The in-memory streams continue accumulating data after this call.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error`] if any IPC stream cannot be flushed or the file cannot be written.
-    pub fn commit(&mut self) -> Result<(), Error> {
-        // Flush builders into streams (but do not write EOS)
-        if let Some(ref mut wl) = self.wavelengths {
-            wl.flush()?;
-        }
-        if let Some(ref mut ms) = self.measurements {
-            ms.flush()?;
-        }
-        if let Some(ref mut it) = self.intensities {
-            it.flush()?;
-        }
-        // Snapshot bytes (no EOS) and write with EOS appended
-        let wl = self.wl_snapshot();
-        let ms = self.ms_snapshot();
-        let it = self.it_snapshot();
-        self.write_file(&wl, &ms, &it)
+    /// Consolidate to a **new** file at `path`, leaving the original appendable.
+    pub fn finish_to(&mut self, path: impl AsRef<Path>) -> Result<(), Error> {
+        self.write_to_disk()?;
+        self.write_finished(path.as_ref())
     }
 
-    /* ----------------------------------------------------------------- Read API */
+    /* ---------------------------------------------------------------------------- Private */
 
-    /// Borrow the manifest metadata.
-    pub fn manifest(&self) -> &Manifest {
-        &self.manifest
+    /// Create a brand-new `.wr` dataset.
+    fn create(path: impl AsRef<Path>, cfg: &Config) -> Result<Self, Error> {
+        let timestamp: u64 = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("system clock before unix epoch")
+            .as_micros()
+            .try_into()
+            .expect("microsecond timestamp exceeds u64");
+        Ok(Self {
+            path: path.as_ref().to_path_buf(),
+            manifest: Manifest::new(timestamp, cfg),
+            wavelengths: Some(Wavelengths::new(Vec::new())?),
+            measurements: Some(Measurements::new(timestamp, 0)?),
+            intensities: Some(Intensities::new()?),
+            file_data: Vec::new(),
+            finished: false,
+            closed: false,
+        })
     }
 
-    /// Read all wavelength records from the dataset.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error`] if the IPC stream is malformed or a column is missing.
-    pub fn read_wavelengths(&self) -> Result<Vec<WavelengthRecord>, Error> {
-        let bytes = self.wl_section();
-        if bytes.is_empty() {
-            return Ok(Vec::new());
+    /// Decode all [`RecordBatch`]es for a table from disk segments.
+    fn read_batches(&self, table: Table) -> Result<Vec<arrow::array::RecordBatch>, Error> {
+        let mut all = Vec::new();
+        for bytes in segment_streams(&self.file_data, &self.manifest.segments, table) {
+            let decoded = match self.finished {
+                true => crate::util::file_batches(&bytes)?,
+                false => batches(&bytes)?,
+            };
+            all.extend(decoded);
         }
-        let cursor = Cursor::new(bytes);
-        let reader = StreamReader::try_new(cursor, None)?;
-        let mut out = Vec::new();
-        for batch in reader {
-            let batch = batch?;
-            let ids = batch
-                .column_by_name("id")
-                .ok_or_else(|| Error::MissingColumn("id".into()))?
-                .as_primitive::<UInt16Type>();
-            let nms = batch
-                .column_by_name("nm")
-                .ok_or_else(|| Error::MissingColumn("nm".into()))?
-                .as_primitive::<Float32Type>();
-            for i in 0..batch.num_rows() {
-                out.push(WavelengthRecord {
-                    id: ids.value(i),
-                    nm: nms.value(i),
-                });
-            }
-        }
-        Ok(out)
+        Ok(all)
     }
 
-    /// Read all measurement records from the dataset.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error`] if the IPC stream is malformed or a column is missing.
-    // TODO Move all read functions into respective modules e.g. self.wavelengths.read
-    pub fn read_measurements(&self) -> Result<Vec<MeasurementRecord>, Error> {
-        let bytes = self.ms_section();
-        if bytes.is_empty() {
-            return Ok(Vec::new());
-        }
-        let cursor = Cursor::new(bytes);
-        let reader = StreamReader::try_new(cursor, None)?;
-        let mut out = Vec::new();
-        for batch in reader {
-            let batch = batch?;
-            let ids = col_primitive::<UInt32Type>(&batch, "id")?;
-            let ts = col_primitive::<UInt64Type>(&batch, "timestamp")?;
-            let xs = col_primitive::<Float32Type>(&batch, "x")?;
-            let ys = col_primitive::<Float32Type>(&batch, "y")?;
-            let zs = col_primitive::<Float32Type>(&batch, "z")?;
-            let als = col_primitive::<Float32Type>(&batch, "a")?;
-            let integ = col_primitive::<UInt64Type>(&batch, "integration")?;
-            for i in 0..batch.num_rows() {
-                out.push(MeasurementRecord {
-                    id: ids.value(i),
-                    timestamp: ts.value(i),
-                    x: nullable(xs, i),
-                    y: nullable(ys, i),
-                    z: nullable(zs, i),
-                    a: nullable(als, i),
-                    integration: integ.value(i),
-                });
-            }
-        }
-        Ok(out)
-    }
-
-    /// Read all intensity records from the dataset.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error`] if the IPC stream is malformed or a column is missing.
-    pub fn read_intensities(&self) -> Result<Vec<IntensityRecord>, Error> {
-        let bytes = self.it_section();
-        if bytes.is_empty() {
-            return Ok(Vec::new());
-        }
-        let cursor = Cursor::new(bytes);
-        let reader = StreamReader::try_new(cursor, None)?;
-        let mut out = Vec::new();
-        for batch in reader {
-            let batch = batch?;
-            let ms = col_primitive::<UInt32Type>(&batch, "measurement")?;
-            let wls = col_primitive::<UInt16Type>(&batch, "wavelength")?;
-            let vals = col_primitive::<Float64Type>(&batch, "intensity")?;
-            for i in 0..batch.num_rows() {
-                out.push(IntensityRecord {
-                    measurement: ms.value(i),
-                    wavelength: wls.value(i),
-                    intensity: vals.value(i),
-                });
-            }
-        }
-        Ok(out)
-    }
-
-    /* ------------------------------------------------------------------------------- Internals */
-
+    /// Flush pending data and write the segmented file to disk.
     fn write_to_disk(&mut self) -> Result<(), Error> {
-        if self.closed {
-            return Ok(());
-        }
-        // Finish all streams (writes EOS into the Buf)
-        if let Some(ref mut wl) = self.wavelengths {
-            wl.finish()?;
-        }
-        if let Some(ref mut ms) = self.measurements {
-            ms.finish()?;
-        }
-        if let Some(ref mut it) = self.intensities {
-            it.finish()?;
-        }
-        let wl = self
-            .wavelengths
-            .as_ref()
-            .map_or_else(Vec::new, wavelengths::Wavelengths::bytes);
-        let ms = self
-            .measurements
-            .as_ref()
-            .map_or_else(Vec::new, measurements::Measurements::bytes);
-        let it = self
-            .intensities
-            .as_ref()
-            .map_or_else(Vec::new, intensities::Intensities::bytes);
-        self.write_file(&wl, &ms, &it)
-    }
-
-    fn wl_snapshot(&self) -> Vec<u8> {
-        match &self.wavelengths {
-            Some(wl) => eos(wl.bytes()),
-            None => self.wl_bytes.clone(),
+        match self.closed {
+            true => Ok(()),
+            false => self.write_segmented(),
         }
     }
 
-    fn ms_snapshot(&self) -> Vec<u8> {
-        match &self.measurements {
-            Some(ms) => eos(ms.bytes()),
-            None => self.ms_bytes.clone(),
-        }
-    }
+    /// Extract pending bytes via [`take_bytes`], append as new segments, rewrite file.
+    fn write_segmented(&mut self) -> Result<(), Error> {
+        let new_wl = self.wavelengths.as_mut().map(|w| w.take_bytes()).transpose()?.unwrap_or_default();
+        let new_ms = self.measurements.as_mut().map(|m| m.take_bytes()).transpose()?.unwrap_or_default();
+        let new_it = self.intensities.as_mut().map(|i| i.take_bytes()).transpose()?.unwrap_or_default();
 
-    fn it_snapshot(&self) -> Vec<u8> {
-        match &self.intensities {
-            Some(it) => eos(it.bytes()),
-            None => self.it_bytes.clone(),
-        }
-    }
+        let existing_end = self
+            .manifest
+            .segments
+            .iter()
+            .map(|s| s.offset + s.length)
+            .max()
+            .unwrap_or(HEADER as u64);
 
-    /// Get the wavelengths IPC section bytes (with EOS, ready for [`StreamReader`]).
-    fn wl_section(&self) -> Vec<u8> {
-        match &self.wavelengths {
-            Some(wl) => eos(wl.bytes()),
-            None => self.wl_bytes.clone(),
-        }
-    }
+        let mut segments = self.manifest.segments.clone();
+        let mut offset = existing_end;
 
-    fn ms_section(&self) -> Vec<u8> {
-        match &self.measurements {
-            Some(ms) => eos(ms.bytes()),
-            None => self.ms_bytes.clone(),
+        for (table, bytes) in [
+            (Table::Wavelengths, &new_wl),
+            (Table::Measurements, &new_ms),
+            (Table::Intensities, &new_it),
+        ] {
+            if !bytes.is_empty() {
+                segments.push(Segment { table, offset, length: bytes.len() as u64 });
+                offset += bytes.len() as u64;
+            }
         }
-    }
 
-    fn it_section(&self) -> Vec<u8> {
-        match &self.intensities {
-            Some(it) => eos(it.bytes()),
-            None => self.it_bytes.clone(),
-        }
-    }
-
-    fn write_file(&self, wl: &[u8], ms: &[u8], it: &[u8]) -> Result<(), Error> {
+        self.manifest.segments = segments;
         let manifest_str = toml::to_string(&self.manifest)?;
         let manifest_bytes = manifest_str.as_bytes();
+
         let header = Header {
+            manifest_offset: offset,
             manifest_len: manifest_bytes.len() as u64,
-            wavelengths_len: wl.len() as u64,
-            measurements_len: ms.len() as u64,
-            intensities_len: it.len() as u64,
+            finished: false,
         };
+
+        let end = existing_end as usize;
+        let existing = match end > HEADER && self.file_data.len() >= end {
+            true => &self.file_data[HEADER..end],
+            false => &[] as &[u8],
+        };
+
         let mut file = std::fs::File::create(&self.path)?;
         header.write(&mut file)?;
+        std::io::Write::write_all(&mut file, existing)?;
+        std::io::Write::write_all(&mut file, &new_wl)?;
+        std::io::Write::write_all(&mut file, &new_ms)?;
+        std::io::Write::write_all(&mut file, &new_it)?;
         std::io::Write::write_all(&mut file, manifest_bytes)?;
-        std::io::Write::write_all(&mut file, wl)?;
-        std::io::Write::write_all(&mut file, ms)?;
-        std::io::Write::write_all(&mut file, it)?;
+
+        self.file_data = std::fs::read(&self.path)?;
+
+        if let Some(ref mut wl) = self.wavelengths { wl.reset()?; }
+        if let Some(ref mut ms) = self.measurements { ms.reset()?; }
+        if let Some(ref mut it) = self.intensities { it.reset()?; }
+
+        Ok(())
+    }
+
+    /// Consolidate all segments into Arrow IPC file format and write to `path`.
+    fn write_finished(&self, path: &Path) -> Result<(), Error> {
+        let wl = consolidate::<Wavelengths>(&self.file_data, &self.manifest.segments, Table::Wavelengths)?;
+        let ms = consolidate::<Measurements>(&self.file_data, &self.manifest.segments, Table::Measurements)?;
+        let it = consolidate::<Intensities>(&self.file_data, &self.manifest.segments, Table::Intensities)?;
+
+        let mut segments = Vec::with_capacity(3);
+        let mut offset = HEADER as u64;
+
+        for (table, bytes) in [
+            (Table::Wavelengths, &wl),
+            (Table::Measurements, &ms),
+            (Table::Intensities, &it),
+        ] {
+            if !bytes.is_empty() {
+                segments.push(Segment { table, offset, length: bytes.len() as u64 });
+                offset += bytes.len() as u64;
+            }
+        }
+
+        let mut manifest = self.manifest.clone();
+        manifest.segments = segments;
+        let manifest_str = toml::to_string(&manifest)?;
+        let manifest_bytes = manifest_str.as_bytes();
+
+        let header = Header {
+            manifest_offset: offset,
+            manifest_len: manifest_bytes.len() as u64,
+            finished: true,
+        };
+
+        let mut file = std::fs::File::create(path)?;
+        header.write(&mut file)?;
+        std::io::Write::write_all(&mut file, &wl)?;
+        std::io::Write::write_all(&mut file, &ms)?;
+        std::io::Write::write_all(&mut file, &it)?;
+        std::io::Write::write_all(&mut file, manifest_bytes)?;
+
         Ok(())
     }
 }
@@ -467,31 +364,41 @@ impl Drop for Dataset {
 
 /* ---------------------------------------------------------------------------- Helper Functions */
 
-/// Append the 8-byte Arrow IPC EOS sentinel to a byte vector.
-fn eos(mut bytes: Vec<u8>) -> Vec<u8> {
-    // TODO // TODO Remove EOS constant. Bytes written automatically on arrow::ipc::writer::StreamWriter::finish
-    bytes.extend_from_slice(&EOS);
-    bytes
+/// Collect each segment's bytes as a separate IPC stream for a given table.
+fn segment_streams(data: &[u8], segments: &[Segment], table: Table) -> Vec<Vec<u8>> {
+    segments
+        .iter()
+        .filter(|s| s.table == table)
+        .filter_map(|seg| {
+            let start = seg.offset as usize;
+            let end = start + seg.length as usize;
+            match end <= data.len() {
+                true => Some(data[start..end].to_vec()),
+                false => None,
+            }
+        })
+        .collect()
 }
 
-/// Extract a typed primitive column from a [`RecordBatch`] by name.
-fn col_primitive<'a, T>(batch: &'a RecordBatch, name: &str) -> Result<&'a PrimitiveArray<T>, Error>
-where
-    T: ArrowPrimitiveType,
-{
-    batch
-        .column_by_name(name)
-        .ok_or_else(|| Error::MissingColumn(name.into()))
-        .map(AsArray::as_primitive::<T>)
-}
-
-/// Read a nullable value at row `i`.
-fn nullable<T>(arr: &PrimitiveArray<T>, i: usize) -> Option<T::Native>
-where
-    T: ArrowPrimitiveType,
-{
-    match arr.is_null(i) {
-        true => None,
-        false => Some(arr.value(i)),
+/// Read all batches for a table from disk and re-encode as Arrow IPC file format.
+fn consolidate<W: Writer>(
+    file_data: &[u8],
+    segments: &[Segment],
+    table: Table,
+) -> Result<Vec<u8>, Error> {
+    let mut all = Vec::new();
+    for bytes in segment_streams(file_data, segments, table) {
+        all.extend(batches(&bytes)?);
     }
+    if all.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut writer = W::new_file_writer()?;
+    for batch in &all {
+        writer.write(batch)?;
+    }
+    writer.finish()?;
+    let buf = writer.into_inner()?;
+    let cursor = buf.into_inner().map_err(|e| Error::Io(e.into_error()))?;
+    Ok(cursor.into_inner())
 }

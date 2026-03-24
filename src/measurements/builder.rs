@@ -14,6 +14,8 @@ use std::sync::Arc;
 
 use arrow::array::{ArrayRef, Float32Builder, UInt32Builder, UInt64Builder};
 
+use crate::writer::Build;
+
 /* ------------------------------------------------------------------------------ Public Exports */
 
 /// Arrow record-batch builder for the measurements table.
@@ -37,19 +39,12 @@ pub(super) struct Builder {
     c: Float32Builder,
     /// Integration time in microseconds.
     integration: UInt32Builder,
-    /// Number of measurements in the batch.
+    /// Number of pending rows.
     len: usize,
 }
 
 impl Builder {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Append one measurement row.
-    ///
-    /// All optional coordinate fields are feature-gated. Unneeded fields can be disabled in
-    /// `cargo.toml` for improved ergonomics. This does not change the underlying `schema`.
     #[allow(clippy::too_many_arguments, reason = "Schema requires all fields")]
     pub fn push(
         &mut self,
@@ -74,39 +69,22 @@ impl Builder {
         self.integration.append_value(integration);
         self.len += 1;
     }
+}
 
-    /// Returns true if the builder is ready to be flushed.
-    ///
-    /// # Apache Arrow Chunking
-    ///
-    /// Each record batch can contain an arbitrary number of rows. When implementing the arrow
-    /// columnar format, users must decide how many rows to include in each record batch. Smaller
-    /// batches transmit with lower latency but incur more per-message overhead. Larger batches
-    /// amortise header costs and improve throughput but increase memory footprint and latency.
-    /// Arrow performance studies suggest batches in the `256 KB` to `1 MB` range. Consider
-    /// adjusting batch size to fit CPU caches (L2/L3) and balance streaming latency.
-    ///
-    /// | **Batch Size** | **Throughput (GB/s)** |
-    /// | -------------: | --------------------: |
-    /// | 16 KB | ~1.0 |
-    /// | 64 KB | ~2.0 |
-    /// | 256 KB | ~5.0 |
-    /// | 1 MB | ~7.7 |
-    /// | 16 MB | ~6.8 |
-    ///
-    /// # Optimum Batch Size
-    ///
-    /// Each row in the [`measurements`][1] table occupies 40 bytes.
-    /// Optimum batch size `~256KB` is achieved with `~6500` rows
-    ///
-    /// [1]: super::Measurements
-    pub fn is_full(&self) -> bool {
+/* ----------------------------------------------------------------------- Trait Implementations */
+
+impl Build for Builder {
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    /// ~256 KB batches at 40 bytes/row ≈ 6500 rows.
+    fn is_full(&self) -> bool {
         const MAX: usize = 6500;
         self.len >= MAX
     }
 
-    /// Finish the current arrays and return them as columns. Resets the builder.
-    pub fn columns(&mut self) -> Vec<ArrayRef> {
+    fn columns(&mut self) -> Vec<ArrayRef> {
         self.len = 0;
         vec![
             Arc::new(self.id.finish()),

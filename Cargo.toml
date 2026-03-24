@@ -26,8 +26,8 @@ c = []
 
 [lints.clippy]
 # Base lint profiles
-cargo = "warn"
-pedantic = "warn"
+cargo = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
 # Specific lint options
 alloc_instead_of_core = "deny"
 allow_attributes_without_reason = "deny"
@@ -49,7 +49,7 @@ toml = "1.0"
 [dependencies.arrow]
 version = "58.0"
 default-features = false
-features = ["ipc_compression"]
+features = ["ipc_compression"] # TODO Remove arrow compression to allow zero-copy reads
 
 [dependencies.serde]
 version = "1.0"

@@ -8,9 +8,10 @@ Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the conditions of the LICENSE are met.
 */
 
-/* ----------------------------------------------------------------------------- Private Modules */
+/* ------------------------------------------------------------------------------------- Modules */
 
 mod builder;
+pub(super) mod record;
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
@@ -20,20 +21,13 @@ use std::time::SystemTime;
 
 use arrow::array::RecordBatch;
 use arrow::datatypes::DataType::{Float32, UInt32, UInt64};
-use arrow::datatypes::{Field, Schema};
-use arrow::ipc::writer::StreamWriter;
-use uom::si::f32::{Angle, Length, Time};
-use uom::si::time::microsecond;
+use arrow::datatypes::{Field, Float32Type, Schema, UInt32Type, UInt64Type};
 
 use self::builder::Builder;
-use crate::format::{Buf, Units};
-use crate::writer::Writer;
-use crate::{Config, Error};
-
-/* -------------------------------------------------------------------------------- Constants */
-
-/// Flush threshold — rows per batch.
-const SIZE: usize = 8_192;
+use self::record::Record;
+use crate::Error;
+use crate::util::{col, nullable};
+use crate::writer::{Ipc, Writer};
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
@@ -41,12 +35,10 @@ const SIZE: usize = 8_192;
 ///
 /// Each measurement is assigned a sequential `u32` ID. Timestamps are stored
 /// as `UInt64` microsecond offsets from the manifest epoch. Coordinate columns
-/// (`x`, `y`, `z`, `a`) are nullable `Float32`.
-pub(crate) struct Measurements {
-    // TODO add one-line doc comment for each field
-    stream: StreamWriter<Buf>,
-    buf: Buf,
-    builder: Builder,
+/// are nullable `Float32`.
+pub struct Measurements {
+    /// Shared IPC stream + builder.
+    ipc: Ipc<Builder>,
     /// Next auto-increment measurement ID.
     next: AtomicU32,
     /// Manifest epoch in microseconds since UNIX epoch.
@@ -54,24 +46,18 @@ pub(crate) struct Measurements {
 }
 
 impl Measurements {
-    /// Create a new, empty measurements table.
-    pub fn new(epoch: i64, cfg: &Config) -> Result<Self, Error> {
-        let buf = Buf::new();
-        let stream = Self::new_stream_writer(buf.clone())?; // TODO Can we avoid this clone or make it cheaper by using an Arc inside `Buf`?
+    /// Create a new measurements table with the given epoch and starting ID.
+    pub fn new(epoch: u64, next_id: u32) -> Result<Self, Error> {
         Ok(Self {
-            stream,
-            buf,
-            builder: Builder::new(),
-            next_id: 0,
+            ipc: Ipc::new(Self::new_stream()?, Self::schema(), Builder::default()),
+            next: AtomicU32::new(next_id),
             epoch,
-            cfg: cfg.clone(), // Inavoidable deep clone not in hot-path.
         })
     }
 
     /// Record a new measurement. Returns the assigned measurement ID.
     ///
-    /// All optional coordinate fields are feature-gated. Unneeded fields can be disabled in
-    /// `cargo.toml` for improved ergonomics. This does not change the underlying `schema`.
+    /// All optional coordinate fields are feature-gated.
     #[allow(clippy::too_many_arguments, reason = "User may require all fields")]
     pub fn push(
         &mut self,
@@ -85,69 +71,59 @@ impl Measurements {
     ) -> Result<u32, Error> {
         let now: u64 = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("Great scott! System clock is before the unix epoch")
+            .expect("system clock before unix epoch")
             .as_micros()
             .try_into()
-            .expect("Microsecond timestamp exceeds u64 range");
+            .expect("microsecond timestamp exceeds u64");
         let ts = now.saturating_sub(self.epoch);
         let id = self.next.fetch_add(1, Ordering::SeqCst);
-        self.builder.push(id, ts, x, y, z, a, b, c, integration);
-        self.try_flush()?;
+        self.ipc.builder.push(id, ts, x, y, z, a, b, c, integration);
+        self.ipc.try_flush()?;
         Ok(id)
     }
 
-    /// Flush pending rows from the builder into the IPC stream.
-    pub fn flush(&mut self) -> Result<(), Error> {
-        if self.builder.len() == 0 {
-            return Ok(());
-        }
-        let columns = self.builder.columns();
-        let batch = RecordBatch::try_new(Self::schema(), columns)?;
-        self.stream.write(&batch)?;
-        Ok(())
+    /// Flush builder, finish stream, and extract the serialised bytes.
+    pub fn take_bytes(&mut self) -> Result<Vec<u8>, Error> {
+        self.ipc.take_bytes()
     }
 
-    /// Write the Arrow IPC EOS sentinel.
-    pub fn finish(&mut self) -> Result<(), Error> {
-        self.flush()?;
-        self.stream.finish()?;
+    /// Discard the current stream and start a fresh one.
+    pub fn reset(&mut self) -> Result<(), Error> {
+        self.ipc.reset(Self::new_stream()?);
         Ok(())
-    }
-
-    /// Snapshot the current IPC bytes (without EOS).
-    pub fn bytes(&self) -> Vec<u8> {
-        self.buf.bytes()
     }
 }
 
-/* -------------------------------------------------------------------------- Helper Functions */
+/* ---------------------------------------------------------------------------- Read Functions */
 
-fn convert_length(
-    val: Option<Length>,
-    unit: Option<Units>,
-    name: &str,
-) -> Result<Option<f32>, Error> {
-    match (val, unit) {
-        (Some(v), Some(u)) => Ok(Some(u.length_to_f32(v))),
-        (None, _) => Ok(None),
-        (Some(_), None) => Err(Error::InvalidFormat(format!(
-            "{name} value provided but unit not configured"
-        ))),
+/// Extract [`Record`]s from pre-decoded [`RecordBatch`]es.
+pub(crate) fn decode(batches: &[RecordBatch]) -> Result<Vec<Record>, Error> {
+    let mut out = Vec::new();
+    for batch in batches {
+        let ids = col::<UInt32Type>(batch, "id")?;
+        let ts = col::<UInt64Type>(batch, "timestamp")?;
+        let xs = col::<Float32Type>(batch, "x")?;
+        let ys = col::<Float32Type>(batch, "y")?;
+        let zs = col::<Float32Type>(batch, "z")?;
+        let als = col::<Float32Type>(batch, "a")?;
+        let bs = col::<Float32Type>(batch, "b")?;
+        let cs = col::<Float32Type>(batch, "c")?;
+        let integ = col::<UInt32Type>(batch, "integration")?;
+        (0..batch.num_rows()).for_each(|i| {
+            out.push(Record {
+                id: ids.value(i),
+                timestamp: ts.value(i),
+                x: nullable(xs, i),
+                y: nullable(ys, i),
+                z: nullable(zs, i),
+                a: nullable(als, i),
+                b: nullable(bs, i),
+                c: nullable(cs, i),
+                integration: integ.value(i),
+            });
+        });
     }
-}
-
-fn convert_angle(
-    val: Option<Angle>,
-    unit: Option<Units>,
-    name: &str,
-) -> Result<Option<f32>, Error> {
-    match (val, unit) {
-        (Some(v), Some(u)) => Ok(Some(u.angle_to_f32(v))),
-        (None, _) => Ok(None),
-        (Some(_), None) => Err(Error::InvalidFormat(format!(
-            "{name} value provided but unit not configured"
-        ))),
-    }
+    Ok(out)
 }
 
 /* ----------------------------------------------------------------------- Trait Implementations */
@@ -161,7 +137,9 @@ impl Writer for Measurements {
             Field::new("y", Float32, true),
             Field::new("z", Float32, true),
             Field::new("a", Float32, true),
-            Field::new("integration", UInt64, false),
+            Field::new("b", Float32, true),
+            Field::new("c", Float32, true),
+            Field::new("integration", UInt32, false),
         ]))
     });
 }

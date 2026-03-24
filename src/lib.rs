@@ -8,7 +8,36 @@ Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the conditions of the LICENSE are met.
 */
 
-//! TODO write crate-level docs
+//! Standardised data storage for optical spectroscopy.
+//!
+//! The `wray` format stores wavelengths, spatial measurements, and intensity spectra in a compact
+//! binary file wrapping Apache Arrow IPC streams.
+//!
+//! # Lifecycle
+//!
+//! 1. **Create** a new file with [`new`][1].
+//! 2. **Push** wavelengths, measurements, and intensities.
+//! 3. [`Close`][2] the file once all data has been written.
+//! 4. [`Open`][3] existing files to add additional data as required.
+//! 5. Convert into a read-only format with [`finish`][4] (consume) or [`finish_to`][5] (copy) for
+//!    improved random access read performance and reduced file size.
+//!
+//! # File format
+//!
+//! ```text
+//! [Header 24 B] [Segment 1] [Segment 2] … [Segment N] [Manifest TOML]
+//! ```
+//!
+//! The 24-byte header stores magic bytes `WRAY`, format version, finished flag, and the manifest
+//! offset. Each segment holds Arrow IPC stream data. The manifest TOML at the end indexes all
+//! segments and stores experiment metadata. On [`finish`][4], segments are consolidated into the
+//! Arrow IPC **file** format for random-access reads.
+//!
+//! [1]: Dataset::new
+//! [2]: Dataset::close
+//! [3]: Dataset::open
+//! [4]: Dataset::finish
+//! [5]: Dataset::finish_to
 
 /* ----------------------------------------------------------------------------- Private Modules */
 

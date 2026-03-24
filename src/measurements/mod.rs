@@ -25,7 +25,6 @@ use arrow::datatypes::{Field, Schema};
 use arrow::ipc::writer::StreamWriter;
 
 use self::builder::Builder;
-use crate::format::{Buf, Units};
 use crate::writer::Writer;
 use crate::{Config, Error};
 
@@ -95,11 +94,21 @@ impl Measurements {
         Ok(id)
     }
 
-    /// Flush pending rows from the builder into the IPC stream.
-    pub fn flush(&mut self) -> Result<(), Error> {
-        if self.builder.len() == 0 {
-            return Ok(());
+    /// Flush pending rows from the [`Builder`] into the [`IPC stream`][1] if the builder exceeds a
+    /// constant threshold size, else no-op.
+    ///
+    /// [1]: StreamWriter
+    pub fn try_flush(&mut self) -> Result<(), Error> {
+        match self.builder.is_full() {
+            true => self.flush(),
+            false => Ok(()),
         }
+    }
+
+    /// Flush pending rows from the [`Builder`] into the [`IPC stream`][1]
+    ///
+    /// [1]: StreamWriter
+    pub fn flush(&mut self) -> Result<(), Error> {
         let columns = self.builder.columns();
         let batch = RecordBatch::try_new(Self::schema(), columns)?;
         self.stream.write(&batch)?;

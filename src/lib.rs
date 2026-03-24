@@ -72,6 +72,8 @@ mod tests {
         y: Some(Units::Mm),
         z: None,
         a: None,
+        b: None,
+        c: None,
     };
 
     const XYZA: Config = Config {

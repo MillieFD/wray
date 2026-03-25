@@ -1,3 +1,4 @@
 cognitive-complexity-threshold = 5
 excessive-nesting-threshold = 3
 too-many-arguments-threshold = 5
+ignore-interior-mutability = ["std::sync::LazyLock"]

@@ -201,7 +201,7 @@ impl Dataset {
     }
 
     /// Consolidate to a **new** file at `path`, leaving the original appendable.
-    pub fn finish_to(&mut self, path: impl AsRef<Path>) -> Result<(), Error> {
+    pub fn snapshot(&mut self, path: impl AsRef<Path>) -> Result<(), Error> {
         self.write_to_disk()?;
         self.write_finished(path.as_ref())
     }

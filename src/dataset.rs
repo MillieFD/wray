@@ -133,7 +133,7 @@ impl Dataset {
     /// # Panics
     ///
     /// Panics if the dataset is not open for writing.
-    pub fn wavelengths(&mut self) -> &mut Wavelengths {
+    pub const fn wavelengths(&mut self) -> &mut Wavelengths {
         self.wavelengths.as_mut().expect("dataset open for writing")
     }
 
@@ -142,7 +142,7 @@ impl Dataset {
     /// # Panics
     ///
     /// Panics if the dataset is not open for writing.
-    pub fn measurements(&mut self) -> &mut Measurements {
+    pub const fn measurements(&mut self) -> &mut Measurements {
         self.measurements.as_mut().expect("dataset open for writing")
     }
 
@@ -151,7 +151,7 @@ impl Dataset {
     /// # Panics
     ///
     /// Panics if the dataset is not open for writing.
-    pub fn intensities(&mut self) -> &mut Intensities {
+    pub const fn intensities(&mut self) -> &mut Intensities {
         self.intensities.as_mut().expect("dataset open for writing")
     }
 

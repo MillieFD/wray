@@ -10,34 +10,31 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 //! Standardised data storage for optical spectroscopy.
 //!
-//! The `wray` format stores wavelengths, spatial measurements, and intensity spectra in a compact
-//! binary file wrapping Apache Arrow IPC streams.
+//! Wray stores wavelengths, spatial measurements, and intensity spectra in a
+//! compact binary file wrapping Apache Arrow IPC streams.
 //!
 //! # Lifecycle
 //!
-//! 1. **Create** a new file with [`new`][1].
-//! 2. **Push** wavelengths, measurements, and intensities.
-//! 3. [`Close`][2] the file once all data has been written.
-//! 4. [`Open`][3] existing files to add additional data as required.
-//! 5. Convert into a read-only format with [`finish`][4] (consume) or [`finish_to`][5] (copy) for
-//!    improved random access read performance and reduced file size.
+//! 1. **Create** a [`Dataset`] with [`Dataset::new`].
+//! 2. **Push** wavelengths, measurements, and intensities via table accessors.
+//! 3. **Close** with [`Dataset::close`] (appendable) or [`Dataset::finish`]
+//!    (sealed, Arrow file format). Use [`Dataset::finish_to`] to write a
+//!    finished copy without consuming the original.
+//! 4. **Reopen** with [`Dataset::new`] or [`Dataset::open`] — unfinished files
+//!    are automatically opened for appending.
+//! 5. **Read** with [`Dataset::open`] and the `read_*` methods.
 //!
 //! # File format
 //!
 //! ```text
-//! [Header 24 B] [Segment 1] [Segment 2] … [Segment N] [Manifest TOML]
+//! [Header 24 B] [Segment …] [Segment …] … [Manifest TOML]
 //! ```
 //!
-//! The 24-byte header stores magic bytes `WRAY`, format version, finished flag, and the manifest
-//! offset. Each segment holds Arrow IPC stream data. The manifest TOML at the end indexes all
-//! segments and stores experiment metadata. On [`finish`][4], segments are consolidated into the
-//! Arrow IPC **file** format for random-access reads.
-//!
-//! [1]: Dataset::new
-//! [2]: Dataset::close
-//! [3]: Dataset::open
-//! [4]: Dataset::finish
-//! [5]: Dataset::finish_to
+//! The 24-byte header stores magic bytes (`WRAY`), format version, a finished
+//! flag, and the manifest offset/length. Each segment holds Arrow IPC stream
+//! data. The TOML manifest at the end indexes all segments and stores
+//! experiment metadata. On [`finish`](Dataset::finish), segments are
+//! consolidated into Arrow IPC **file** format for random-access reads.
 
 /* ----------------------------------------------------------------------------- Private Modules */
 

@@ -200,43 +200,10 @@ impl Dataset {
         Ok(())
     }
 
-    /// Finalise to a **new** file at `path`, leaving the original unchanged.
-    ///
-    /// The original file remains unfinished and appendable. The new file
-    /// contains all data consolidated into Arrow IPC file format.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error`] if the IPC streams cannot be finalised or the file
-    /// cannot be written.
+    /// Consolidate to a **new** file at `path`, leaving the original appendable.
     pub fn finish_to(&mut self, path: impl AsRef<Path>) -> Result<(), Error> {
-        self.write_finished(path.as_ref(), false)
-    }
-
-    /// Write a snapshot of the current data to disk without consuming `self`.
-    ///
-    /// Useful for long-running experiments that need periodic durability.
-    /// The in-memory streams continue accumulating data after this call.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error`] if any IPC stream cannot be flushed or the file cannot be written.
-    pub fn commit(&mut self) -> Result<(), Error> {
-        // Flush builders into streams (but do not write EOS)
-        if let Some(ref mut wl) = self.wavelengths {
-            wl.flush()?;
-        }
-        if let Some(ref mut ms) = self.measurements {
-            ms.flush()?;
-        }
-        if let Some(ref mut it) = self.intensities {
-            it.flush()?;
-        }
-        // Snapshot bytes (no EOS) and write with EOS appended
-        let wl = self.wl_snapshot();
-        let ms = self.ms_snapshot();
-        let it = self.it_snapshot();
-        self.write_file(&wl, &ms, &it)
+        self.write_to_disk()?;
+        self.write_finished(path.as_ref())
     }
 
     /* ---------------------------------------------------------------------------- Private */
@@ -413,14 +380,15 @@ fn segment_streams(data: &[u8], segments: &[Segment], table: Table) -> Vec<Vec<u
         .collect()
 }
 
-/// Read a nullable value at row `i`.
-fn nullable<T>(arr: &PrimitiveArray<T>, i: usize) -> Option<T::Native>
-where
-    T: ArrowPrimitiveType,
-{
-    match arr.is_null(i) {
-        true => None,
-        false => Some(arr.value(i)),
+/// Read all batches for a table from disk and re-encode as Arrow IPC file format.
+fn consolidate<W: Writer>(
+    file_data: &[u8],
+    segments: &[Segment],
+    table: Table,
+) -> Result<Vec<u8>, Error> {
+    let mut all = Vec::new();
+    for bytes in segment_streams(file_data, segments, table) {
+        all.extend(batches(&bytes)?);
     }
     if all.is_empty() {
         return Ok(Vec::new());

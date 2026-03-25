@@ -10,7 +10,6 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
-use std::fmt::{Display, Formatter};
 use std::io::{Read, Write};
 
 use serde::{Deserialize, Serialize};
@@ -27,8 +26,8 @@ pub(crate) const VERSION: [u8; 3] = [0, 2, 0];
 
 /// Length (in bytes) of the fixed-size file header.
 ///
-/// Layout: `MAGIC(4) + VERSION(4) + manifest_offset(8) + manifest_len(8) = 24`.
-pub(crate) const HEADER: usize = MAGIC.len() + size_of::<u32>() + 2 * size_of::<u64>();
+/// Layout: `MAGIC(4) + VERSION(3) + FINISHED(1) + manifest_offset(8) + manifest_len(8) = 24`.
+pub(crate) const HEADER: usize = 24;
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
@@ -81,68 +80,7 @@ pub struct Config {
     pub c: Option<Units>,
 }
 
-impl Config {
-    pub fn new(
-        #[cfg(feature = "x")] x: Option<Units>,
-        #[cfg(feature = "y")] y: Option<Units>,
-        #[cfg(feature = "z")] z: Option<Units>,
-        #[cfg(feature = "a")] a: Option<Units>,
-        #[cfg(feature = "b")] b: Option<Units>,
-        #[cfg(feature = "c")] c: Option<Units>,
-    ) -> Self {
-        Self {
-            #[cfg(feature = "x")]
-            x,
-            #[cfg(not(feature = "x"))]
-            x: None,
-            #[cfg(feature = "y")]
-            y,
-            #[cfg(not(feature = "y"))]
-            y: None,
-            #[cfg(feature = "z")]
-            z,
-            #[cfg(not(feature = "z"))]
-            z: None,
-            #[cfg(feature = "a")]
-            a,
-            #[cfg(not(feature = "a"))]
-            a: None,
-            #[cfg(feature = "b")]
-            b,
-            #[cfg(not(feature = "b"))]
-            b: None,
-            #[cfg(feature = "c")]
-            c,
-            #[cfg(not(feature = "c"))]
-            c: None,
-        }
-    }
-}
-
-/* ------------------------------------------------------------------------------------ Manifest */
-
-/// Identifies which Arrow table a [`Segment`] belongs to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Table {
-    /// The wavelengths table.
-    Wavelengths,
-    /// The measurements table.
-    Measurements,
-    /// The intensities table.
-    Intensities,
-}
-
-/// A contiguous byte range of Arrow IPC stream data within the file.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Segment {
-    /// Which table this segment belongs to.
-    pub table: Table,
-    /// Byte offset from the start of the file.
-    pub offset: u64,
-    /// Length in bytes.
-    pub length: u64,
-}
+/* ------------------------------------------------------------------------------ Format Enum */
 
 /// File format encoding stored in the binary header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -185,11 +123,9 @@ pub struct Manifest {
     pub timestamp: u64,
     /// Measurement IDs that are calibration measurements.
     pub calibrations: Vec<u32>,
-    /// Whether the dataset has been explicitly finalised.
-    pub finished: bool,
     /// Per-axis dimension configuration.
     pub axes: Config,
-    /// Segment index — byte ranges for each table's IPC stream data.
+    /// Segment index — byte ranges for each table's IPC data.
     pub segments: Vec<Segment>,
 }
 
@@ -199,7 +135,6 @@ impl Manifest {
         Self {
             timestamp,
             calibrations: Vec::with_capacity(8),
-            finished: false,
             axes: cfg.clone(),
             segments: Vec::new(),
         }
@@ -210,19 +145,22 @@ impl Manifest {
 
 /// The 24-byte header at the start of every `.wr` file.
 ///
-/// Layout: `MAGIC(4) + VERSION(4) + manifest_offset(8) + manifest_len(8)`.
+/// Layout: `MAGIC(4) + VERSION(3) + FINISHED(1) + manifest_offset(8) + manifest_len(8)`.
 pub(crate) struct Header {
     /// Byte offset of the TOML manifest from the start of the file.
     pub manifest_offset: u64,
     /// Length of the TOML manifest in bytes.
     pub manifest_len: u64,
+    /// Whether the file uses the finished (Arrow file) format.
+    pub finished: bool,
 }
 
 impl Header {
     /// Write the header to `w`.
     pub fn write<W: Write>(&self, w: &mut W) -> Result<(), Error> {
         w.write_all(MAGIC)?;
-        w.write_all(&VERSION.to_le_bytes())?;
+        w.write_all(&VERSION)?;
+        w.write_all(&[u8::from(self.finished)])?;
         w.write_all(&self.manifest_offset.to_le_bytes())?;
         w.write_all(&self.manifest_len.to_le_bytes())?;
         Ok(())
@@ -242,6 +180,7 @@ impl Header {
             )));
         }
         Ok(Self {
+            finished: buf[7] != 0,
             manifest_offset: u64::from_le_bytes(buf[8..16].try_into().expect("8 bytes")),
             manifest_len: u64::from_le_bytes(buf[16..24].try_into().expect("8 bytes")),
         })

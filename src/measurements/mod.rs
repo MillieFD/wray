@@ -21,12 +21,13 @@ use std::time::SystemTime;
 
 use arrow::array::RecordBatch;
 use arrow::datatypes::DataType::{Float32, UInt32, UInt64};
-use arrow::datatypes::{Field, Schema};
-use arrow::ipc::writer::StreamWriter;
+use arrow::datatypes::{Field, Float32Type, Schema, UInt32Type, UInt64Type};
 
 use self::builder::Builder;
-use crate::writer::Writer;
+use self::record::Record;
 use crate::Error;
+use crate::util::{col, nullable};
+use crate::writer::{Ipc, Writer};
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
@@ -81,25 +82,9 @@ impl Measurements {
         Ok(id)
     }
 
-    /// Flush pending rows from the [`Builder`] into the [`IPC stream`][1] if the builder exceeds a
-    /// constant threshold size, else no-op.
-    ///
-    /// [1]: StreamWriter
-    pub fn try_flush(&mut self) -> Result<(), Error> {
-        match self.builder.is_full() {
-            true => self.flush(),
-            false => Ok(()),
-        }
-    }
-
-    /// Flush pending rows from the [`Builder`] into the [`IPC stream`][1]
-    ///
-    /// [1]: StreamWriter
-    pub fn flush(&mut self) -> Result<(), Error> {
-        let columns = self.builder.columns();
-        let batch = RecordBatch::try_new(Self::schema(), columns)?;
-        self.stream.write(&batch)?;
-        Ok(())
+    /// Flush builder, finish stream, and extract the serialised bytes.
+    pub fn take_bytes(&mut self) -> Result<Vec<u8>, Error> {
+        self.ipc.take_bytes()
     }
 
     /// Discard the current stream and start a fresh one.
@@ -111,18 +96,34 @@ impl Measurements {
 
 /* ---------------------------------------------------------------------------- Read Functions */
 
-fn convert_length(
-    val: Option<Length>,
-    unit: Option<Units>,
-    name: &str,
-) -> Result<Option<f32>, Error> {
-    match (val, unit) {
-        (Some(v), Some(u)) => Ok(Some(u.length_to_f32(v))),
-        (None, _) => Ok(None),
-        (Some(_), None) => Err(Error::InvalidFormat(format!(
-            "{name} value provided but unit not configured"
-        ))),
+/// Extract [`Record`]s from pre-decoded [`RecordBatch`]es.
+pub(crate) fn decode(batches: &[RecordBatch]) -> Result<Vec<Record>, Error> {
+    let mut out = Vec::new();
+    for batch in batches {
+        let ids = col::<UInt32Type>(batch, "id")?;
+        let ts = col::<UInt64Type>(batch, "timestamp")?;
+        let xs = col::<Float32Type>(batch, "x")?;
+        let ys = col::<Float32Type>(batch, "y")?;
+        let zs = col::<Float32Type>(batch, "z")?;
+        let als = col::<Float32Type>(batch, "a")?;
+        let bs = col::<Float32Type>(batch, "b")?;
+        let cs = col::<Float32Type>(batch, "c")?;
+        let integ = col::<UInt32Type>(batch, "integration")?;
+        (0..batch.num_rows()).for_each(|i| {
+            out.push(Record {
+                id: ids.value(i),
+                timestamp: ts.value(i),
+                x: nullable(xs, i),
+                y: nullable(ys, i),
+                z: nullable(zs, i),
+                a: nullable(als, i),
+                b: nullable(bs, i),
+                c: nullable(cs, i),
+                integration: integ.value(i),
+            });
+        });
     }
+    Ok(out)
 }
 
 /* ----------------------------------------------------------------------- Trait Implementations */
@@ -138,7 +139,7 @@ impl Writer for Measurements {
             Field::new("a", Float32, true),
             Field::new("b", Float32, true),
             Field::new("c", Float32, true),
-            Field::new("integration", UInt64, false),
+            Field::new("integration", UInt32, false),
         ]))
     });
 }

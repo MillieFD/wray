@@ -24,12 +24,8 @@ use arrow::datatypes::{Field, Float64Type, Schema, UInt16Type, UInt32Type};
 use self::builder::Builder;
 use self::record::Record;
 use crate::Error;
-use crate::writer::Writer;
-
-/* -------------------------------------------------------------------------------- Constants */
-
-/// Flush threshold — rows per batch.
-const SIZE: usize = 32_768;
+use crate::util::col;
+use crate::writer::{Ipc, Writer};
 
 /* ------------------------------------------------------------------------------ Public Exports */
 

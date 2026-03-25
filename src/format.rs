@@ -22,8 +22,8 @@ use crate::Error;
 /// Magic bytes at the start of every `.wr` file.
 pub(crate) const MAGIC: &[u8; 4] = b"WRAY";
 
-/// Current format version.
-pub(crate) const VERSION: u32 = 1;
+/// Current format version (major, minor, patch).
+pub(crate) const VERSION: [u8; 3] = [0, 2, 0];
 
 /// Length (in bytes) of the fixed-size file header.
 ///
@@ -41,14 +41,14 @@ pub(crate) const HEADER: usize = MAGIC.len() + size_of::<u32>() + 2 * size_of::<
 pub enum Units {
     /// Length in metres.
     Length,
-    /// Angle using radians.
+    /// Angle in radians.
     Angle,
 }
 
 /* ----------------------------------------------------------------------- Trait Implementations */
 
-impl Display for Units {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+impl core::fmt::Display for Units {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         match self {
             Self::Length => f.write_str("m"),
             Self::Angle => f.write_str("rad"),
@@ -144,11 +144,43 @@ pub struct Segment {
     pub length: u64,
 }
 
-/// Experiment-level metadata stored in every `.wr` file.
+/// File format encoding stored in the binary header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Format {
+    /// Arrow IPC stream format — supports reading and appending.
+    Unfinished,
+    /// Arrow IPC file format — compression and random-access reads.
+    Finished,
+}
+
+/* ------------------------------------------------------------------------------------ Manifest */
+
+/// Identifies which Arrow table a [`Segment`] belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Table {
+    /// The wavelengths table.
+    Wavelengths,
+    /// The measurements table.
+    Measurements,
+    /// The intensities table.
+    Intensities,
+}
+
+/// A contiguous byte range of Arrow IPC data within the file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Segment {
+    /// Which table this segment belongs to.
+    pub table: Table,
+    /// Byte offset from the start of the file.
+    pub offset: u64,
+    /// Length in bytes.
+    pub length: u64,
+}
+
+/// Experiment-level metadata stored in every `.wray` file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
-    /// Wray format version.
-    pub version: u32,
     /// Absolute UNIX epoch timestamp in microseconds when the dataset was created.
     pub timestamp: u64,
     /// Measurement IDs that are calibration measurements.
@@ -162,10 +194,9 @@ pub struct Manifest {
 }
 
 impl Manifest {
-    /// Create a new manifest for the given creation timestamp and configuration.
+    /// Create a new [`Manifest`] for the given creation timestamp and [`Config`].
     pub(crate) fn new(timestamp: u64, cfg: &Config) -> Self {
         Self {
-            version: VERSION,
             timestamp,
             calibrations: Vec::with_capacity(8),
             finished: false,
@@ -202,12 +233,12 @@ impl Header {
         let mut buf = [0u8; HEADER];
         r.read_exact(&mut buf)?;
         if &buf[0..4] != MAGIC {
-            return Err(Error::InvalidFormat("Invalid magic bytes".into()));
+            return Err(Error::InvalidFormat("invalid magic bytes".into()));
         }
-        let version = u32::from_le_bytes(buf[4..8].try_into().expect("4 bytes"));
-        if version != VERSION {
+        if buf[4] != VERSION[0] {
             return Err(Error::InvalidFormat(format!(
-                "unsupported version: {version}"
+                "unsupported version: {}.{}.{}",
+                buf[4], buf[5], buf[6]
             )));
         }
         Ok(Self {

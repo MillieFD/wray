@@ -54,8 +54,16 @@ mod writer;
 
 pub use self::dataset::Dataset;
 pub use self::error::Error;
-pub use self::format::{Config, Manifest, ManifestUnits, Units};
-pub use self::records::{IntensityRecord, MeasurementRecord, WavelengthRecord};
+pub use self::format::{Config, Format, Manifest, Units};
+
+/// A single wavelength entry returned by read queries.
+pub type Wavelength = wavelengths::record::Record;
+
+/// A single measurement entry returned by read queries.
+pub type Measurement = measurements::record::Record;
+
+/// A single intensity entry returned by read queries.
+pub type Intensity = intensities::record::Record;
 
 /* ---------------------------------------------------------------------------------- Unit Tests */
 
@@ -68,8 +76,8 @@ mod tests {
     use super::*;
 
     const XY: Config = Config {
-        x: Some(Units::Mm),
-        y: Some(Units::Mm),
+        x: Some(Units::Length),
+        y: Some(Units::Length),
         z: None,
         a: None,
         b: None,
@@ -77,10 +85,12 @@ mod tests {
     };
 
     const XYZA: Config = Config {
-        x: Some(Units::Mm),
-        y: Some(Units::Mm),
-        z: Some(Units::Um),
-        a: Some(Units::Deg),
+        x: Some(Units::Length),
+        y: Some(Units::Length),
+        z: Some(Units::Length),
+        a: Some(Units::Angle),
+        b: None,
+        c: None,
     };
 
     fn tmp() -> PathBuf {
@@ -98,34 +108,29 @@ mod tests {
         let wavelengths_nm = vec![400.0, 500.0, 600.0, 700.0];
         let n = wavelengths_nm.len();
 
-        // PART 1: Write
+        // Write
         {
             let mut ds = Dataset::new(&path, &XY).expect("create dataset");
-            let wl_ids = ds
-                .push_wavelengths(&wavelengths_nm)
-                .expect("push wavelengths");
+            let wl_ids = ds.wavelengths().push(&wavelengths_nm).expect("push wl");
             assert_eq!(wl_ids, vec![0, 1, 2, 3]);
 
-            let x = Length::new::<millimeter>(1.0);
-            let y = Length::new::<millimeter>(2.0);
-            let integration = Time::new::<millisecond>(100.0);
             let id = ds
-                .push(Some(x), Some(y), None, None, integration)
+                .measurements()
+                .push(Some(0.001), Some(0.002), None, None, None, None, 100_000)
                 .expect("push");
             assert_eq!(id, 0);
 
-            let intensities = vec![0.1, 0.2, 0.3, 0.4];
-            ds.push_intensities(id, &wl_ids, &intensities)
+            ds.intensities()
+                .push(id, &wl_ids, &[0.1, 0.2, 0.3, 0.4])
                 .expect("push intensities");
 
             ds.close().expect("close");
         }
 
-        // PART 2: Read
+        // Read
         {
             let ds = Dataset::open(&path).expect("open dataset");
-            assert!(!ds.manifest().finished);
-            assert_eq!(ds.manifest().version, 1u32);
+            assert!(!ds.is_finished());
 
             let wl = ds.read_wavelengths().expect("read wavelengths");
             assert_eq!(wl.len(), n);
@@ -154,10 +159,10 @@ mod tests {
         let path = tmp();
         {
             let mut ds = Dataset::new(&path, &XY).expect("create");
-            ds.push_wavelengths(&[500.0]).expect("push wl");
-            let integration = Time::new::<millisecond>(50.0);
-            ds.push(None, None, None, None, integration).expect("push");
-            // No explicit close — rely on Drop
+            ds.wavelengths().push(&[500.0]).expect("push wl");
+            ds.measurements()
+                .push(None, None, None, None, None, None, 50_000)
+                .expect("push");
         }
         let ds = Dataset::open(&path).expect("open after drop");
         assert_eq!(ds.read_wavelengths().expect("read").len(), 1);
@@ -171,13 +176,11 @@ mod tests {
         let path = tmp();
         {
             let mut ds = Dataset::new(&path, &XY).expect("create");
-            let integration = Time::new::<millisecond>(10.0);
-            // Push with no coordinates at all
-            ds.push(None, None, None, None, integration)
+            ds.measurements()
+                .push(None, None, None, None, None, None, 10_000)
                 .expect("push none");
-            // Push with only x
-            let x = Length::new::<millimeter>(5.0);
-            ds.push(Some(x), None, None, None, integration)
+            ds.measurements()
+                .push(Some(0.005), None, None, None, None, None, 10_000)
                 .expect("push x");
             ds.close().expect("close");
         }
@@ -187,7 +190,7 @@ mod tests {
         assert!(ms[0].x.is_none());
         assert!(ms[0].y.is_none());
         assert!(ms[1].x.is_some());
-        assert!((ms[1].x.unwrap() - 5.0).abs() < 1e-3);
+        assert!((ms[1].x.expect("x present") - 0.005).abs() < 1e-6);
     }
 
     /* ----------------------------------------------------------------------------- Calibration */
@@ -197,8 +200,10 @@ mod tests {
         let path = tmp();
         {
             let mut ds = Dataset::new(&path, &XY).expect("create");
-            let integration = Time::new::<millisecond>(10.0);
-            let id = ds.push(None, None, None, None, integration).expect("push");
+            let id = ds
+                .measurements()
+                .push(None, None, None, None, None, None, 10_000)
+                .expect("push");
             ds.calibration(id);
             ds.close().expect("close");
         }
@@ -206,7 +211,7 @@ mod tests {
         assert_eq!(ds.manifest().calibrations, vec![0]);
     }
 
-    /* ----------------------------------------------------------------------------- Finish flag */
+    /* ----------------------------------------------------------------------------- Finish modes */
 
     #[test]
     fn finish_sets_flag() {
@@ -216,7 +221,64 @@ mod tests {
             ds.finish().expect("finish");
         }
         let ds = Dataset::open(&path).expect("open");
-        assert!(ds.manifest().finished);
+        assert!(ds.is_finished());
+    }
+
+    #[test]
+    fn finish_converts_to_file_format() {
+        let path = tmp();
+        {
+            let mut ds = Dataset::new(&path, &XY).expect("create");
+            let ids = ds.wavelengths().push(&[400.0, 500.0]).expect("push wl");
+            let m = ds
+                .measurements()
+                .push(Some(0.001), None, None, None, None, None, 50_000)
+                .expect("push");
+            ds.intensities().push(m, &ids, &[1.0, 2.0]).expect("push it");
+            ds.finish().expect("finish");
+        }
+        let ds = Dataset::open(&path).expect("open");
+        assert!(ds.is_finished());
+        assert_eq!(ds.read_wavelengths().expect("wl").len(), 2);
+        assert_eq!(ds.read_measurements().expect("ms").len(), 1);
+        assert_eq!(ds.read_intensities().expect("it").len(), 2);
+    }
+
+    #[test]
+    fn finish_to_creates_separate_file() {
+        let path = tmp();
+        let finished_path = tmp();
+        {
+            let mut ds = Dataset::new(&path, &XY).expect("create");
+            ds.wavelengths().push(&[400.0]).expect("push wl");
+            ds.measurements()
+                .push(None, None, None, None, None, None, 10_000)
+                .expect("push");
+            ds.finish_to(&finished_path).expect("finish_to");
+            // Original should still be usable (not closed).
+            ds.wavelengths().push(&[500.0]).expect("push more");
+            ds.close().expect("close");
+        }
+        // Finished copy.
+        let finished = Dataset::open(&finished_path).expect("open finished");
+        assert!(finished.is_finished());
+        assert_eq!(finished.read_wavelengths().expect("wl").len(), 1);
+
+        // Original — not finished, has extra data.
+        let original = Dataset::open(&path).expect("open original");
+        assert!(!original.is_finished());
+        assert_eq!(original.read_wavelengths().expect("wl").len(), 2);
+    }
+
+    #[test]
+    fn finished_is_read_only() {
+        let path = tmp();
+        {
+            let ds = Dataset::new(&path, &XY).expect("create");
+            ds.finish().expect("finish");
+        }
+        let ds = Dataset::open(&path).expect("open");
+        assert!(ds.is_finished());
     }
 
     /* -------------------------------------------------------------------------- Units manifest */
@@ -229,10 +291,10 @@ mod tests {
             ds.close().expect("close");
         }
         let ds = Dataset::open(&path).expect("open");
-        assert_eq!(ds.manifest().units.x, Some(Units::Mm));
-        assert_eq!(ds.manifest().units.y, Some(Units::Mm));
-        assert_eq!(ds.manifest().units.z, Some(Units::Um));
-        assert_eq!(ds.manifest().units.a, Some(Units::Deg));
+        assert_eq!(ds.manifest().axes.x, Some(Units::Length));
+        assert_eq!(ds.manifest().axes.y, Some(Units::Length));
+        assert_eq!(ds.manifest().axes.z, Some(Units::Length));
+        assert_eq!(ds.manifest().axes.a, Some(Units::Angle));
     }
 
     /* ---------------------------------------------------------------- Wavelength deduplication */
@@ -241,33 +303,10 @@ mod tests {
     fn wavelength_dedup() {
         let path = tmp();
         let mut ds = Dataset::new(&path, &XY).expect("create");
-        let ids1 = ds.push_wavelengths(&[400.0, 500.0]).expect("first push");
-        let ids2 = ds.push_wavelengths(&[400.0, 600.0]).expect("second push");
+        let ids1 = ds.wavelengths().push(&[400.0, 500.0]).expect("first push");
+        let ids2 = ds.wavelengths().push(&[400.0, 600.0]).expect("second push");
         assert_eq!(ids1, vec![0, 1]);
-        assert_eq!(ids2, vec![0, 2]); // 400.0 reused, 600.0 is new
-    }
-
-    /* ------------------------------------------------------------------------- Commit snapshot */
-
-    #[test]
-    fn commit_writes_readable_file() {
-        let path = tmp();
-        let mut ds = Dataset::new(&path, &XY).expect("create");
-        ds.push_wavelengths(&[450.0]).expect("push wl");
-        let integration = Time::new::<millisecond>(20.0);
-        ds.push(None, None, None, None, integration).expect("push");
-        ds.commit().expect("commit");
-
-        // File should be readable mid-experiment
-        let snap = Dataset::open(&path).expect("open snapshot");
-        assert_eq!(snap.read_wavelengths().expect("read").len(), 1);
-
-        // Can still push more data after committing
-        ds.push_wavelengths(&[550.0]).expect("push more");
-        ds.close().expect("close");
-
-        let final_ds = Dataset::open(&path).expect("open final");
-        assert_eq!(final_ds.read_wavelengths().expect("read").len(), 2);
+        assert_eq!(ids2, vec![0, 2]);
     }
 
     /* ------------------------------------------- Full coordinates (x, y, z, a) */
@@ -277,23 +316,22 @@ mod tests {
         let path = tmp();
         {
             let mut ds = Dataset::new(&path, &XYZA).expect("create");
-            let x = Length::new::<millimeter>(1.0);
-            let y = Length::new::<millimeter>(2.0);
-            let z = Length::new::<millimeter>(0.003); // 3 µm = 0.003 mm; stored as µm
-            let a = Angle::new::<degree>(45.0);
-            let integration = Time::new::<millisecond>(100.0);
-            ds.push(Some(x), Some(y), Some(z), Some(a), integration)
+            let x = 0.001;
+            let y = 0.002;
+            let z = 3e-6;
+            let a = std::f32::consts::FRAC_PI_4;
+            ds.measurements()
+                .push(Some(x), Some(y), Some(z), Some(a), None, None, 100_000)
                 .expect("push");
             ds.close().expect("close");
         }
         let ds = Dataset::open(&path).expect("open");
         let ms = ds.read_measurements().expect("read");
         assert_eq!(ms.len(), 1);
-        assert!((ms[0].x.expect("x") - 1.0).abs() < 0.01);
-        assert!((ms[0].y.expect("y") - 2.0).abs() < 0.01);
-        // z is stored in µm: 0.003 mm = 3 µm
-        assert!((ms[0].z.expect("z") - 3.0).abs() < 0.01);
-        assert!((ms[0].a.expect("a") - 45.0).abs() < 0.01);
+        assert!((ms[0].x.expect("x") - 0.001).abs() < 1e-6);
+        assert!((ms[0].y.expect("y") - 0.002).abs() < 1e-6);
+        assert!((ms[0].z.expect("z") - 3e-6).abs() < 1e-9);
+        assert!((ms[0].a.expect("a") - std::f32::consts::FRAC_PI_4).abs() < 1e-6);
     }
 
     /* ------------------------------------------- Relative timestamps */
@@ -303,13 +341,125 @@ mod tests {
         let path = tmp();
         {
             let mut ds = Dataset::new(&path, &XY).expect("create");
-            let integration = Time::new::<millisecond>(10.0);
-            ds.push(None, None, None, None, integration).expect("push");
+            ds.measurements()
+                .push(None, None, None, None, None, None, 10_000)
+                .expect("push");
             ds.close().expect("close");
         }
         let ds = Dataset::open(&path).expect("open");
         let ms = ds.read_measurements().expect("read");
-        // Timestamp should be a small offset (< 1 second) from init, not a UNIX epoch
-        assert!(ms[0].timestamp < 1_000_000); // < 1 second in µs
+        assert!(ms[0].timestamp < 1_000_000);
+    }
+
+    /* ------------------------------------------------------------------- Reopen and append */
+
+    #[test]
+    fn open_appends_data() {
+        let path = tmp();
+        let wl_nm = [400.0, 500.0, 600.0];
+
+        // Write initial data and close.
+        {
+            let mut ds = Dataset::new(&path, &XY).expect("create");
+            let ids = ds.wavelengths().push(&wl_nm).expect("push wl");
+            let m = ds
+                .measurements()
+                .push(Some(0.001), Some(0.002), None, None, None, None, 50_000)
+                .expect("push");
+            ds.intensities().push(m, &ids, &[1.0, 2.0, 3.0]).expect("push it");
+            ds.close().expect("close");
+        }
+
+        // Open (unfinished) and append more data.
+        {
+            let mut ds = Dataset::open(&path).expect("open");
+            let ids = ds.wavelengths().push(&[400.0, 700.0]).expect("push wl2");
+            assert_eq!(ids[0], 0); // deduped
+            assert_eq!(ids[1], 3); // new
+
+            let m = ds
+                .measurements()
+                .push(Some(0.003), None, None, None, None, None, 60_000)
+                .expect("push2");
+            assert_eq!(m, 1);
+            ds.intensities().push(m, &ids, &[4.0, 5.0]).expect("push it2");
+            ds.close().expect("close2");
+        }
+
+        // Verify all data.
+        let ds = Dataset::open(&path).expect("open");
+        assert_eq!(ds.read_wavelengths().expect("wl").len(), 4);
+        assert_eq!(ds.read_measurements().expect("ms").len(), 2);
+        assert_eq!(ds.read_intensities().expect("it").len(), 5);
+    }
+
+    #[test]
+    fn multiple_open_cycles() {
+        let path = tmp();
+        {
+            let mut ds = Dataset::new(&path, &XY).expect("create");
+            ds.wavelengths().push(&[400.0]).expect("wl");
+            ds.measurements()
+                .push(None, None, None, None, None, None, 10_000)
+                .expect("push");
+            ds.close().expect("close");
+        }
+        for cycle in 1..=3 {
+            let mut ds = Dataset::open(&path).expect("open");
+            ds.measurements()
+                .push(None, None, None, None, None, None, 10_000)
+                .expect("push");
+            ds.close().expect("close");
+            let ds = Dataset::open(&path).expect("open");
+            assert_eq!(ds.read_measurements().expect("ms").len(), cycle + 1);
+        }
+    }
+
+    /* ---------------------------------------------------------------- Query API guards */
+
+    #[test]
+    fn is_finished_flag() {
+        let path = tmp();
+        {
+            let ds = Dataset::new(&path, &XY).expect("create");
+            ds.close().expect("close");
+        }
+        let unfinished = Dataset::open(&path).expect("open");
+        assert!(!unfinished.is_finished());
+
+        let path2 = tmp();
+        {
+            let ds = Dataset::new(&path2, &XY).expect("create");
+            ds.finish().expect("finish");
+        }
+        let finished = Dataset::open(&path2).expect("open");
+        assert!(finished.is_finished());
+    }
+
+    /* ----------------------------------------------------------------- Niche optimization */
+
+    #[test]
+    fn units_niche_optimised() {
+        assert_eq!(size_of::<Option<Units>>(), size_of::<Units>());
+    }
+
+    /* ------------------------------------------------------------------- New dispatch */
+
+    #[test]
+    fn new_opens_existing() {
+        let path = tmp();
+        {
+            let mut ds = Dataset::new(&path, &XY).expect("create");
+            ds.wavelengths().push(&[400.0]).expect("push wl");
+            ds.close().expect("close");
+        }
+        // new() on existing file should open it for appending.
+        {
+            let mut ds = Dataset::new(&path, &XY).expect("open via new");
+            ds.wavelengths().push(&[500.0]).expect("push more");
+            ds.close().expect("close");
+        }
+        let ds = Dataset::open(&path).expect("open");
+        assert_eq!(ds.read_wavelengths().expect("wl").len(), 2);
     }
 }

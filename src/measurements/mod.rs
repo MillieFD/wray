@@ -34,12 +34,10 @@ use crate::Error;
 ///
 /// Each measurement is assigned a sequential `u32` ID. Timestamps are stored
 /// as `UInt64` microsecond offsets from the manifest epoch. Coordinate columns
-/// (`x`, `y`, `z`, `a`) are nullable `Float32`.
-pub(crate) struct Measurements {
-    // TODO add one-line doc comment for each field
-    stream: StreamWriter<Buf>,
-    buf: Buf,
-    builder: Builder,
+/// are nullable `Float32`.
+pub struct Measurements {
+    /// Shared IPC stream + builder.
+    ipc: Ipc<Builder>,
     /// Next auto-increment measurement ID.
     next: AtomicU32,
     /// Manifest epoch in microseconds since UNIX epoch.
@@ -47,24 +45,18 @@ pub(crate) struct Measurements {
 }
 
 impl Measurements {
-    /// Create a new, empty measurements table.
-    pub fn new(epoch: i64, cfg: &Config) -> Result<Self, Error> {
-        let buf = Buf::new();
-        let stream = Self::new_stream_writer(buf.clone())?; // TODO Can we avoid this clone or make it cheaper by using an Arc inside `Buf`?
+    /// Create a new measurements table with the given epoch and starting ID.
+    pub fn new(epoch: u64, next_id: u32) -> Result<Self, Error> {
         Ok(Self {
-            stream,
-            buf,
-            builder: Builder::new(),
-            next_id: 0,
+            ipc: Ipc::new(Self::new_stream()?, Self::schema(), Builder::default()),
+            next: AtomicU32::new(next_id),
             epoch,
-            cfg: cfg.clone(), // Inavoidable deep clone not in hot-path.
         })
     }
 
     /// Record a new measurement. Returns the assigned measurement ID.
     ///
-    /// All optional coordinate fields are feature-gated. Unneeded fields can be disabled in
-    /// `cargo.toml` for improved ergonomics. This does not change the underlying `schema`.
+    /// All optional coordinate fields are feature-gated.
     #[allow(clippy::too_many_arguments, reason = "User may require all fields")]
     pub fn push(
         &mut self,
@@ -78,14 +70,14 @@ impl Measurements {
     ) -> Result<u32, Error> {
         let now: u64 = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("Great scott! System clock is before the unix epoch")
+            .expect("system clock before unix epoch")
             .as_micros()
             .try_into()
-            .expect("Microsecond timestamp exceeds u64 range");
+            .expect("microsecond timestamp exceeds u64");
         let ts = now.saturating_sub(self.epoch);
         let id = self.next.fetch_add(1, Ordering::SeqCst);
-        self.builder.push(id, ts, x, y, z, a, b, c, integration);
-        self.try_flush()?;
+        self.ipc.builder.push(id, ts, x, y, z, a, b, c, integration);
+        self.ipc.try_flush()?;
         Ok(id)
     }
 
@@ -110,20 +102,14 @@ impl Measurements {
         Ok(())
     }
 
-    /// Write the Arrow IPC EOS sentinel.
-    pub fn finish(&mut self) -> Result<(), Error> {
-        self.flush()?;
-        self.stream.finish()?;
+    /// Discard the current stream and start a fresh one.
+    pub fn reset(&mut self) -> Result<(), Error> {
+        self.ipc.reset(Self::new_stream()?);
         Ok(())
-    }
-
-    /// Snapshot the current IPC bytes (without EOS).
-    pub fn bytes(&self) -> Vec<u8> {
-        self.buf.bytes()
     }
 }
 
-/* -------------------------------------------------------------------------- Helper Functions */
+/* ---------------------------------------------------------------------------- Read Functions */
 
 fn convert_length(
     val: Option<Length>,

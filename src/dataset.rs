@@ -480,22 +480,20 @@ impl Drop for Dataset {
 
 /* ---------------------------------------------------------------------------- Helper Functions */
 
-/// Append the 8-byte Arrow IPC EOS sentinel to a byte vector.
-fn eos(mut bytes: Vec<u8>) -> Vec<u8> {
-    // TODO // TODO Remove EOS constant. Bytes written automatically on arrow::ipc::writer::StreamWriter::finish
-    bytes.extend_from_slice(&EOS);
-    bytes
-}
-
-/// Extract a typed primitive column from a [`RecordBatch`] by name.
-fn col_primitive<'a, T>(batch: &'a RecordBatch, name: &str) -> Result<&'a PrimitiveArray<T>, Error>
-where
-    T: ArrowPrimitiveType,
-{
-    batch
-        .column_by_name(name)
-        .ok_or_else(|| Error::MissingColumn(name.into()))
-        .map(AsArray::as_primitive::<T>)
+/// Collect each segment's bytes as a separate IPC stream for a given table.
+fn segment_streams(data: &[u8], segments: &[Segment], table: Table) -> Vec<Vec<u8>> {
+    segments
+        .iter()
+        .filter(|s| s.table == table)
+        .filter_map(|seg| {
+            let start = seg.offset as usize;
+            let end = start + seg.length as usize;
+            match end <= data.len() {
+                true => Some(data[start..end].to_vec()),
+                false => None,
+            }
+        })
+        .collect()
 }
 
 /// Read a nullable value at row `i`.

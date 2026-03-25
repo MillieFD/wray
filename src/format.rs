@@ -10,10 +10,8 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
-use std::cell::RefCell;
 use std::fmt::{Display, Formatter};
-use std::io::{self, Read, Write};
-use std::rc::Rc;
+use std::io::{Read, Write};
 
 use serde::{Deserialize, Serialize};
 
@@ -27,18 +25,17 @@ pub(crate) const MAGIC: &[u8; 4] = b"WRAY";
 /// Current format version.
 pub(crate) const VERSION: u32 = 1;
 
-/// Length (in bytes) of the fixed size file header.
-// TODO How is semantic versioning stored in a single `u32`? Use three `u8` instead e.g. for 1.0.0?
-// TODO Can HEADER size be determined at compiletime by defining what is in the header?
-pub(crate) const HEADER: usize = MAGIC.len() + size_of::<u32>() + 4 * size_of::<u64>();
-
-/// Arrow IPC end-of-stream sentinel (continuation marker + zero metadata size).
-// TODO Remove EOS constant. Bytes written automatically on arrow::ipc::writer::StreamWriter::finish
-pub(crate) const EOS: [u8; 8] = [0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00];
+/// Length (in bytes) of the fixed-size file header.
+///
+/// Layout: `MAGIC(4) + VERSION(4) + manifest_offset(8) + manifest_len(8) = 24`.
+pub(crate) const HEADER: usize = MAGIC.len() + size_of::<u32>() + 2 * size_of::<u64>();
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
-/// Physical unit for a coordinate axis.
+/// Physical dimension for a coordinate axis.
+///
+/// All values are stored as raw `f32` in SI base units:
+/// metres for [`Length`](Units::Length), radians for [`Angle`](Units::Angle).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Units {
@@ -84,7 +81,68 @@ pub struct Config {
     pub c: Option<Units>,
 }
 
-/* --------------------------------------------------------------------------------- Manifest */
+impl Config {
+    pub fn new(
+        #[cfg(feature = "x")] x: Option<Units>,
+        #[cfg(feature = "y")] y: Option<Units>,
+        #[cfg(feature = "z")] z: Option<Units>,
+        #[cfg(feature = "a")] a: Option<Units>,
+        #[cfg(feature = "b")] b: Option<Units>,
+        #[cfg(feature = "c")] c: Option<Units>,
+    ) -> Self {
+        Self {
+            #[cfg(feature = "x")]
+            x,
+            #[cfg(not(feature = "x"))]
+            x: None,
+            #[cfg(feature = "y")]
+            y,
+            #[cfg(not(feature = "y"))]
+            y: None,
+            #[cfg(feature = "z")]
+            z,
+            #[cfg(not(feature = "z"))]
+            z: None,
+            #[cfg(feature = "a")]
+            a,
+            #[cfg(not(feature = "a"))]
+            a: None,
+            #[cfg(feature = "b")]
+            b,
+            #[cfg(not(feature = "b"))]
+            b: None,
+            #[cfg(feature = "c")]
+            c,
+            #[cfg(not(feature = "c"))]
+            c: None,
+        }
+    }
+}
+
+/* ------------------------------------------------------------------------------------ Manifest */
+
+/// Identifies which Arrow table a [`Segment`] belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Table {
+    /// The wavelengths table.
+    Wavelengths,
+    /// The measurements table.
+    Measurements,
+    /// The intensities table.
+    Intensities,
+}
+
+/// A contiguous byte range of Arrow IPC stream data within the file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Segment {
+    /// Which table this segment belongs to.
+    pub table: Table,
+    /// Byte offset from the start of the file.
+    pub offset: u64,
+    /// Length in bytes.
+    pub length: u64,
+}
 
 /// Experiment-level metadata stored in every `.wr` file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,26 +155,10 @@ pub struct Manifest {
     pub calibrations: Vec<u32>,
     /// Whether the dataset has been explicitly finalised.
     pub finished: bool,
-    /// Per-axis storage units.
-    // TODO Remove ManifestUnits struct. Store Config struct.
-    pub units: ManifestUnits,
-}
-
-/// Per-axis unit declarations in the manifest.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ManifestUnits {
-    /// Unit for x coordinate.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub x: Option<Units>,
-    /// Unit for y coordinate.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub y: Option<Units>,
-    /// Unit for z coordinate.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub z: Option<Units>,
-    /// Unit for angle coordinate.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub a: Option<Units>,
+    /// Per-axis dimension configuration.
+    pub axes: Config,
+    /// Segment index — byte ranges for each table's IPC stream data.
+    pub segments: Vec<Segment>,
 }
 
 impl Manifest {
@@ -127,25 +169,22 @@ impl Manifest {
             timestamp,
             calibrations: Vec::with_capacity(8),
             finished: false,
-            units: ManifestUnits {
-                // TODO Remove ManifestUnits struct and store Config struct directly?
-                x: cfg.x,
-                y: cfg.y,
-                z: cfg.z,
-                a: cfg.a,
-            },
+            axes: cfg.clone(),
+            segments: Vec::new(),
         }
     }
 }
 
 /* ---------------------------------------------------------------------------------- Header */
 
-/// The 40-byte header at the start of every `.wray` file.
+/// The 24-byte header at the start of every `.wr` file.
+///
+/// Layout: `MAGIC(4) + VERSION(4) + manifest_offset(8) + manifest_len(8)`.
 pub(crate) struct Header {
+    /// Byte offset of the TOML manifest from the start of the file.
+    pub manifest_offset: u64,
+    /// Length of the TOML manifest in bytes.
     pub manifest_len: u64,
-    pub wavelengths_len: u64,
-    pub measurements_len: u64,
-    pub intensities_len: u64,
 }
 
 impl Header {
@@ -153,10 +192,8 @@ impl Header {
     pub fn write<W: Write>(&self, w: &mut W) -> Result<(), Error> {
         w.write_all(MAGIC)?;
         w.write_all(&VERSION.to_le_bytes())?;
+        w.write_all(&self.manifest_offset.to_le_bytes())?;
         w.write_all(&self.manifest_len.to_le_bytes())?;
-        w.write_all(&self.wavelengths_len.to_le_bytes())?;
-        w.write_all(&self.measurements_len.to_le_bytes())?;
-        w.write_all(&self.intensities_len.to_le_bytes())?;
         Ok(())
     }
 
@@ -174,10 +211,8 @@ impl Header {
             )));
         }
         Ok(Self {
-            manifest_len: u64::from_le_bytes(buf[8..16].try_into().expect("8 bytes")),
-            wavelengths_len: u64::from_le_bytes(buf[16..24].try_into().expect("8 bytes")),
-            measurements_len: u64::from_le_bytes(buf[24..32].try_into().expect("8 bytes")),
-            intensities_len: u64::from_le_bytes(buf[32..40].try_into().expect("8 bytes")),
+            manifest_offset: u64::from_le_bytes(buf[8..16].try_into().expect("8 bytes")),
+            manifest_len: u64::from_le_bytes(buf[16..24].try_into().expect("8 bytes")),
         })
     }
 }

@@ -49,7 +49,7 @@ toml = "1.0"
 [dependencies.arrow]
 version = "58.0"
 default-features = false
-features = ["ipc_compression"] # TODO Remove arrow compression to allow zero-copy reads
+features = ["ipc"]
 
 [dependencies.serde]
 version = "1.0"

@@ -30,7 +30,11 @@ pub(super) struct Builder {
 
 impl Builder {
     pub fn new() -> Self {
-        Self { ids: Default::default(), nms: Default::default(), len: 0 }
+        Self {
+            ids: Default::default(),
+            nms: Default::default(),
+            len: 0,
+        }
     }
 
     /// Append a single wavelength row.

@@ -56,13 +56,13 @@ pub use self::dataset::Dataset;
 pub use self::error::Error;
 pub use self::format::{Config, Format, Manifest, Units};
 
-/// A single wavelength entry returned by read queries.
+/// A single wavelength record from the dataset.
 pub type Wavelength = wavelengths::record::Record;
 
-/// A single measurement entry returned by read queries.
+/// A single measurement record from the dataset.
 pub type Measurement = measurements::record::Record;
 
-/// A single intensity entry returned by read queries.
+/// A single intensity record from the dataset.
 pub type Intensity = intensities::record::Record;
 
 /* ---------------------------------------------------------------------------------- Unit Tests */

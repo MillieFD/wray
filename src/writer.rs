@@ -113,12 +113,10 @@ impl<B: Build> Ipc<B> {
 /// Schema provider and factory for Arrow IPC table writers.
 pub(crate) trait Writer {
     /// Lazily initialised Arrow schema for this table.
-    #[allow(clippy::declare_interior_mutable_const, reason = "LazyLock is intentionally lazy")]
     const SCHEMA: LazyLock<Arc<Schema>>;
 
     /// Clone the shared schema [`Arc`].
     fn schema() -> Arc<Schema> {
-        #[allow(clippy::borrow_interior_mutable_const, reason = "LazyLock forces initialisation")]
         Self::SCHEMA.clone()
     }
 
@@ -128,7 +126,6 @@ pub(crate) trait Writer {
     ///
     /// Returns [`ArrowError`] if the writer cannot be initialised.
     fn new_stream() -> Result<Stream, ArrowError> {
-        #[allow(clippy::borrow_interior_mutable_const, reason = "LazyLock forces initialisation")]
         StreamWriter::try_new_buffered(Vec::new(), &Self::SCHEMA)
     }
 
@@ -138,7 +135,6 @@ pub(crate) trait Writer {
     ///
     /// Returns [`ArrowError`] if the writer cannot be initialised.
     fn new_file_writer() -> Result<FileWriter<BufWriter<Cursor<Vec<u8>>>>, ArrowError> {
-        #[allow(clippy::borrow_interior_mutable_const, reason = "LazyLock forces initialisation")]
         FileWriter::try_new_buffered(Cursor::new(Vec::new()), &Self::SCHEMA)
     }
 }

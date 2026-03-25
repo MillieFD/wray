@@ -10,19 +10,18 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 //! Standardised data storage for optical spectroscopy.
 //!
-//! Wray stores wavelengths, spatial measurements, and intensity spectra in a
-//! compact binary file wrapping Apache Arrow IPC streams.
+//! The `wray` format stores wavelengths, spatial measurements, and intensity spectra in a compact
+//! binary file wrapping Apache Arrow IPC streams.
 //!
 //! # Lifecycle
 //!
-//! 1. **Create** a [`Dataset`] with [`Dataset::new`].
-//! 2. **Push** wavelengths, measurements, and intensities via table accessors.
-//! 3. **Close** with [`Dataset::close`] (appendable) or [`Dataset::finish`]
-//!    (sealed, Arrow file format). Use [`Dataset::finish_to`] to write a
-//!    finished copy without consuming the original.
-//! 4. **Reopen** with [`Dataset::new`] or [`Dataset::open`] — unfinished files
-//!    are automatically opened for appending.
-//! 5. **Read** with [`Dataset::open`] and the `read_*` methods.
+//! 1. **Create** a new file with [`new`][1].
+//! 2. **Push** wavelengths, measurements, and intensities.
+//! 3. [`Close`][2] the file once all data has been written.
+//! 4. [`Open`][3] existing files to add additional data if required.
+//! 5. Convert to read-only for improved random access read performance and reduced file size. Use
+//!    [`finish`][4] to consume the existing file and replace in situ. Use [`snapshot`][5] to copy
+//!    the data while leaving the original file intact e.g. for interim analysis.
 //!
 //! # File format
 //!
@@ -30,11 +29,15 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 //! [Header 24 B] [Segment …] [Segment …] … [Manifest TOML]
 //! ```
 //!
-//! The 24-byte header stores magic bytes (`WRAY`), format version, a finished
-//! flag, and the manifest offset/length. Each segment holds Arrow IPC stream
-//! data. The TOML manifest at the end indexes all segments and stores
-//! experiment metadata. On [`finish`](Dataset::finish), segments are
-//! consolidated into Arrow IPC **file** format for random-access reads.
+//! The 24-byte header stores magic bytes `WRAY`, format version, finished flag, and the manifest
+//! offset. Each segment holds Arrow IPC stream data. The manifest TOML at the end indexes all
+//! segments and stores experiment metadata.
+//!
+//! [1]: Dataset::new
+//! [2]: Dataset::close
+//! [3]: Dataset::open
+//! [4]: Dataset::finish
+//! [5]: Dataset::snapshot
 
 /* ----------------------------------------------------------------------------- Private Modules */
 
@@ -231,7 +234,9 @@ mod tests {
                 .measurements()
                 .push(Some(0.001), None, None, None, None, None, 50_000)
                 .expect("push");
-            ds.intensities().push(m, &ids, &[1.0, 2.0]).expect("push it");
+            ds.intensities()
+                .push(m, &ids, &[1.0, 2.0])
+                .expect("push it");
             ds.finish().expect("finish");
         }
         let ds = Dataset::open(&path).expect("open");
@@ -251,7 +256,7 @@ mod tests {
             ds.measurements()
                 .push(None, None, None, None, None, None, 10_000)
                 .expect("push");
-            ds.finish_to(&finished_path).expect("finish_to");
+            ds.snapshot(&finished_path).expect("finish_to");
             // Original should still be usable (not closed).
             ds.wavelengths().push(&[500.0]).expect("push more");
             ds.close().expect("close");
@@ -363,7 +368,9 @@ mod tests {
                 .measurements()
                 .push(Some(0.001), Some(0.002), None, None, None, None, 50_000)
                 .expect("push");
-            ds.intensities().push(m, &ids, &[1.0, 2.0, 3.0]).expect("push it");
+            ds.intensities()
+                .push(m, &ids, &[1.0, 2.0, 3.0])
+                .expect("push it");
             ds.close().expect("close");
         }
 
@@ -379,7 +386,9 @@ mod tests {
                 .push(Some(0.003), None, None, None, None, None, 60_000)
                 .expect("push2");
             assert_eq!(m, 1);
-            ds.intensities().push(m, &ids, &[4.0, 5.0]).expect("push it2");
+            ds.intensities()
+                .push(m, &ids, &[4.0, 5.0])
+                .expect("push it2");
             ds.close().expect("close2");
         }
 

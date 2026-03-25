@@ -25,9 +25,15 @@ use crate::{Error, Intensity, Measurement, Wavelength, intensities, measurements
 
 /// A `.wr` dataset for storing optical spectroscopy data with optional metadata.
 ///
-/// Use [`Dataset::new`] to create or open a dataset, push data via the table
-/// accessor methods, and finalise with [`Dataset::close`] or [`Dataset::finish`].
-/// The dataset is also written on [`Drop`].
+/// # Lifecycle
+///
+/// 1. **Create** a new file with [`new`][1].
+/// 2. **Push** wavelengths, measurements, and intensities.
+/// 3. [`Close`][2] the file once all data has been written.
+/// 4. [`Open`][3] existing files to add additional data if required.
+/// 5. Convert to read-only for improved random access read performance and reduced file size. Use
+///    [`finish`][4] to consume the existing file and replace in situ. Use [`snapshot`][5] to copy
+///    the data while leaving the original file intact e.g. for interim analysis.
 pub struct Dataset {
     /// File path.
     path: PathBuf,

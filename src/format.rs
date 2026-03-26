@@ -116,7 +116,7 @@ pub struct Segment {
     pub length: u64,
 }
 
-/// Experiment-level metadata stored in every `.wray` file.
+/// Experiment-level metadata stored in every `.wr` file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     /// Absolute UNIX epoch timestamp in microseconds when the dataset was created.

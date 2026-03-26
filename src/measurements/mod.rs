@@ -71,10 +71,10 @@ impl Measurements {
     ) -> Result<u32, Error> {
         let now: u64 = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("system clock before unix epoch")
+            .expect("Great scott! System clock is before the unix epoch")
             .as_micros()
             .try_into()
-            .expect("microsecond timestamp exceeds u64");
+            .expect("Microsecond timestamp exceeds u64 range");
         let ts = now.saturating_sub(self.epoch);
         let id = self.next.fetch_add(1, Ordering::SeqCst);
         self.ipc.builder.push(id, ts, x, y, z, a, b, c, integration);

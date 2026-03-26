@@ -57,7 +57,8 @@ impl Wavelengths {
 
     /// Insert wavelengths (in nanometres), returning their `u16` IDs.
     ///
-    /// Duplicate wavelengths (within tolerance) reuse existing IDs.
+    /// Duplicate wavelengths (within tolerance) reuse existing IDs. New wavelengths are assigned
+    /// sequential IDs starting after the current maximum.
     pub fn push(&mut self, wavelengths: &[f32]) -> Result<Vec<u16>, Error> {
         let ids = wavelengths
             .iter()

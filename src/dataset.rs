@@ -10,6 +10,7 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -45,8 +46,6 @@ pub struct Dataset {
     measurements: Option<Measurements>,
     /// Intensities writer (`None` when read-only or closed).
     intensities: Option<Intensities>,
-    /// Complete file data for segment reads.
-    file_data: Vec<u8>,
     /// Whether the file uses finished (Arrow file) format.
     finished: bool,
     /// Whether the dataset has been written and closed.
@@ -80,11 +79,13 @@ impl Dataset {
     /// Returns [`Error`] if the file cannot be read, the header is invalid,
     /// or the manifest TOML is malformed.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
-        let data = std::fs::read(path.as_ref())?;
-        let header = Header::read(&mut &data[..])?;
-        let m_start = header.manifest_offset as usize;
-        let m_end = m_start + header.manifest_len as usize;
-        let manifest: Manifest = toml::from_str(std::str::from_utf8(&data[m_start..m_end])?)?;
+        let mut file = std::fs::File::open(path.as_ref())?;
+        let header = Header::read(&mut file)?;
+
+        file.seek(SeekFrom::Start(header.manifest_offset))?;
+        let mut manifest_bytes = vec![0u8; header.manifest_len as usize];
+        file.read_exact(&mut manifest_bytes)?;
+        let manifest: Manifest = toml::from_str(std::str::from_utf8(&manifest_bytes)?)?;
 
         if header.finished {
             return Ok(Self {
@@ -93,26 +94,29 @@ impl Dataset {
                 wavelengths: None,
                 measurements: None,
                 intensities: None,
-                file_data: data,
                 finished: true,
                 closed: true,
             });
         }
 
-        // Restore wavelength dedup cache from existing segments.
+        // Restore wavelength dedup cache — reads only wavelength segments.
         let mut wl_batches = Vec::new();
-        for stream in segment_streams(&data, &manifest.segments, Table::Wavelengths) {
-            wl_batches.extend(batches(&stream)?);
+        for bytes in segment_streams(path.as_ref(), &manifest.segments, Table::Wavelengths)? {
+            wl_batches.extend(batches(&bytes)?);
         }
         let existing_wl = wavelengths::decode(&wl_batches)?;
 
-        // Restore next measurement ID from existing segments.
+        // Restore next measurement ID — reads only measurement segments.
         let mut ms_batches = Vec::new();
-        for stream in segment_streams(&data, &manifest.segments, Table::Measurements) {
-            ms_batches.extend(batches(&stream)?);
+        for bytes in segment_streams(path.as_ref(), &manifest.segments, Table::Measurements)? {
+            ms_batches.extend(batches(&bytes)?);
         }
         let existing_ms = measurements::decode(&ms_batches)?;
-        let next_ms = existing_ms.iter().map(|r| r.id).max().map_or(0, |id| id + 1);
+        let next_ms = existing_ms
+            .iter()
+            .map(|r| r.id)
+            .max()
+            .map_or(0, |id| id + 1);
 
         Ok(Self {
             path: path.as_ref().to_path_buf(),
@@ -120,7 +124,6 @@ impl Dataset {
             measurements: Some(Measurements::new(manifest.timestamp, next_ms)?),
             intensities: Some(Intensities::new()?),
             manifest,
-            file_data: data,
             finished: false,
             closed: false,
         })
@@ -228,7 +231,6 @@ impl Dataset {
             wavelengths: Some(Wavelengths::new(Vec::new())?),
             measurements: Some(Measurements::new(timestamp, 0)?),
             intensities: Some(Intensities::new()?),
-            file_data: Vec::new(),
             finished: false,
             closed: false,
         })
@@ -237,7 +239,7 @@ impl Dataset {
     /// Decode all [`RecordBatch`]es for a table from disk segments.
     fn read_batches(&self, table: Table) -> Result<Vec<arrow::array::RecordBatch>, Error> {
         let mut all = Vec::new();
-        for bytes in segment_streams(&self.file_data, &self.manifest.segments, table) {
+        for bytes in segment_streams(&self.path, &self.manifest.segments, table)? {
             let decoded = match self.finished {
                 true => crate::util::file_batches(&bytes)?,
                 false => batches(&bytes)?,
@@ -293,34 +295,44 @@ impl Dataset {
             finished: false,
         };
 
-        let end = existing_end as usize;
-        let existing = match end > HEADER && self.file_data.len() >= end {
-            true => &self.file_data[HEADER..end],
-            false => &[] as &[u8],
+        // Read existing segment bytes before truncating the file.
+        let existing = if existing_end > HEADER as u64 {
+            let mut src = std::fs::File::open(&self.path)?;
+            src.seek(SeekFrom::Start(HEADER as u64))?;
+            let len = (existing_end - HEADER as u64) as usize;
+            let mut buf = vec![0u8; len];
+            src.read_exact(&mut buf)?;
+            buf
+        } else {
+            Vec::new()
         };
 
         let mut file = std::fs::File::create(&self.path)?;
         header.write(&mut file)?;
-        std::io::Write::write_all(&mut file, existing)?;
+        std::io::Write::write_all(&mut file, &existing)?;
         std::io::Write::write_all(&mut file, &new_wl)?;
         std::io::Write::write_all(&mut file, &new_ms)?;
         std::io::Write::write_all(&mut file, &new_it)?;
         std::io::Write::write_all(&mut file, manifest_bytes)?;
 
-        self.file_data = std::fs::read(&self.path)?;
-
-        if let Some(ref mut wl) = self.wavelengths { wl.reset()?; }
-        if let Some(ref mut ms) = self.measurements { ms.reset()?; }
-        if let Some(ref mut it) = self.intensities { it.reset()?; }
+        if let Some(ref mut wl) = self.wavelengths {
+            wl.reset()?;
+        }
+        if let Some(ref mut ms) = self.measurements {
+            ms.reset()?;
+        }
+        if let Some(ref mut it) = self.intensities {
+            it.reset()?;
+        }
 
         Ok(())
     }
 
     /// Consolidate all segments into Arrow IPC file format and write to `path`.
     fn write_finished(&self, path: &Path) -> Result<(), Error> {
-        let wl = consolidate::<Wavelengths>(&self.file_data, &self.manifest.segments, Table::Wavelengths)?;
-        let ms = consolidate::<Measurements>(&self.file_data, &self.manifest.segments, Table::Measurements)?;
-        let it = consolidate::<Intensities>(&self.file_data, &self.manifest.segments, Table::Intensities)?;
+        let wl = consolidate::<Wavelengths>(&self.path, &self.manifest.segments, Table::Wavelengths)?;
+        let ms = consolidate::<Measurements>(&self.path, &self.manifest.segments, Table::Measurements)?;
+        let it = consolidate::<Intensities>(&self.path, &self.manifest.segments, Table::Intensities)?;
 
         let mut segments = Vec::with_capacity(3);
         let mut offset = HEADER as u64;
@@ -370,30 +382,32 @@ impl Drop for Dataset {
 
 /* ---------------------------------------------------------------------------- Helper Functions */
 
-/// Collect each segment's bytes as a separate IPC stream for a given table.
-fn segment_streams(data: &[u8], segments: &[Segment], table: Table) -> Vec<Vec<u8>> {
+/// Read the raw bytes of a single [`Segment`] from disk.
+fn read_segment(path: &Path, seg: &Segment) -> Result<Vec<u8>, Error> {
+    let mut file = std::fs::File::open(path)?;
+    file.seek(SeekFrom::Start(seg.offset))?;
+    let mut buf = vec![0u8; seg.length as usize];
+    file.read_exact(&mut buf)?;
+    Ok(buf)
+}
+
+/// Read each matching segment's bytes on demand from disk.
+fn segment_streams(path: &Path, segments: &[Segment], table: Table) -> Result<Vec<Vec<u8>>, Error> {
     segments
         .iter()
         .filter(|s| s.table == table)
-        .filter_map(|seg| {
-            let start = seg.offset as usize;
-            let end = start + seg.length as usize;
-            match end <= data.len() {
-                true => Some(data[start..end].to_vec()),
-                false => None,
-            }
-        })
+        .map(|seg| read_segment(path, seg))
         .collect()
 }
 
 /// Read all batches for a table from disk and re-encode as Arrow IPC file format.
 fn consolidate<W: Writer>(
-    file_data: &[u8],
+    path: &Path,
     segments: &[Segment],
     table: Table,
 ) -> Result<Vec<u8>, Error> {
     let mut all = Vec::new();
-    for bytes in segment_streams(file_data, segments, table) {
+    for bytes in segment_streams(path, segments, table)? {
         all.extend(batches(&bytes)?);
     }
     if all.is_empty() {

@@ -54,11 +54,12 @@ pub(crate) struct Ipc<B: Build> {
 
 impl<B: Build> Ipc<B> {
     /// Create a new [`Ipc`] writer.
-    // SAFETY: Arc::new and Some() are const-stable from Rust 1.x; clippy
-    // suggests const but Arc<T> does not yet have a const constructor.
-    #[allow(clippy::missing_const_for_fn, reason = "Arc<Schema> lacks const constructor")]
-    pub fn new(stream: Stream, schema: Arc<Schema>, builder: B) -> Self {
-        Self { stream: Some(stream), schema, builder }
+    pub const fn new(stream: Stream, schema: Arc<Schema>, builder: B) -> Self {
+        Self {
+            stream: Some(stream),
+            schema,
+            builder,
+        }
     }
 
     /// Flush pending rows from the builder into the IPC stream.

@@ -87,8 +87,19 @@ impl Wavelengths {
     }
 
     /// Search for an existing [`Record`] within a constant wavelength tolerance.
+    ///
+    /// Returns [`Some`] if a matching record is found, else returns [`None`].
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// match wavelengths.find(123.45) {
+    ///     Some(record) => println!("Matching record found: {:?}", record),
+    ///     None => println!("No matching record found."),
+    /// }
+    /// ```
     fn find(&self, nm: f32) -> Option<&Record> {
-        const TOLERANCE: f32 = 1E-10;
+        const TOLERANCE: f32 = 1E-10; // 100 picometers
         self.records.iter().find(|r| (r.nm - nm).abs() < TOLERANCE)
     }
 }

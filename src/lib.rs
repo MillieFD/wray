@@ -95,7 +95,7 @@ mod tests {
 
     fn tmp() -> PathBuf {
         NamedTempFile::new()
-            .expect("create temp file")
+            .expect("Unable to create temporary file")
             .into_temp_path()
             .to_path_buf()
     }

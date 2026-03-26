@@ -57,7 +57,10 @@ impl Measurements {
 
     /// Record a new measurement. Returns the assigned measurement ID.
     ///
-    /// All optional coordinate fields are feature-gated.
+    /// ### Cargo Features
+    ///
+    /// All optional coordinate fields are feature-gated. Unneeded fields can be disabled in
+    /// `cargo.toml` for improved ergonomics. This does not change the underlying `schema`.
     #[allow(clippy::too_many_arguments, reason = "User may require all fields")]
     pub fn push(
         &mut self,

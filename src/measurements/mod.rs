@@ -75,9 +75,9 @@ impl Measurements {
             .as_micros()
             .try_into()
             .expect("Microsecond timestamp exceeds u64 range");
-        let ts = now.saturating_sub(self.epoch);
+        let timestamp = now.saturating_sub(self.epoch);
         let id = self.next.fetch_add(1, Ordering::SeqCst);
-        self.ipc.builder.push(id, ts, x, y, z, a, b, c, integration);
+        self.ipc.builder.push(id, timestamp, x, y, z, a, b, c, integration);
         self.ipc.try_flush()?;
         Ok(id)
     }

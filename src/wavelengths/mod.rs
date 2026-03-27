@@ -55,21 +55,19 @@ impl Wavelengths {
         })
     }
 
-    /// Insert wavelengths (in nanometres), returning their `u16` IDs.
+    /// Append wavelengths to the end of the dataset. Returns a list of unique `u16` IDs.
     ///
-    /// Duplicate wavelengths (within tolerance) reuse existing IDs. New wavelengths are assigned
-    /// sequential IDs starting after the current maximum.
-    pub fn push(&mut self, wavelengths: &[f32]) -> Result<Vec<u16>, Error> {
-        let ids = wavelengths
+    /// ### Deduplication
+    ///
+    /// Existing wavelengths are identified using [`find`]. New wavelengths are assigned the next
+    /// sequentially available ID.
+    pub fn push(&mut self, nms: &[f32]) -> Result<Vec<u16>, Error> {
+        let disk = read_records(&self.path, &self.segments)?;
+        let ids: Vec<u16> = nms
             .iter()
-            .map(|&nm| match self.find(nm) {
-                Some(r) => r.id,
-                None => {
-                    let id = self.next.fetch_add(1, Ordering::SeqCst);
-                    self.records.push(Record::new(id, nm));
-                    self.ipc.builder.push(id, nm);
-                    id
-                }
+            .map(|&nm| match find(nm, &self.pending, &disk) {
+                Some(id) => id,
+                None => self.insert(nm),
             })
             .collect();
         self.ipc.try_flush()?;

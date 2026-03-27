@@ -107,6 +107,18 @@ impl Wavelengths {
 
 /* ---------------------------------------------------------------------------- Read Functions */
 
+/// Return the `id` of a wavelength matching `nm` within 100 picometre tolerance, or [`None`] if no
+/// matching wavelength is found.
+///
+/// Checks `pending` (in memory) before `written` (on disk).
+fn find(nm: f32, pending: &[Record], written: &[Record]) -> Option<u16> {
+    pending
+        .iter()
+        .chain(written) // Checks pending (in memory) before written (on disk)
+        .find(|r| (r.nm - nm).abs() < 1E-10) // 100 picometre tolerance
+        .map(|r| r.id)
+}
+
 /// Extract [`Record`]s from pre-decoded [`RecordBatch`]es.
 pub(crate) fn decode(batches: &[RecordBatch]) -> Result<Vec<Record>, Error> {
     batches.iter().try_fold(Vec::new(), |mut out, batch| {

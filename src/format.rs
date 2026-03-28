@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::Error;
 
-/* -------------------------------------------------------------------------------- Constants */
+/* ----------------------------------------------------------------------------------- Constants */
 
 /// Magic bytes at the start of every `.wr` file.
 pub(crate) const MAGIC: &[u8; 4] = b"WRAY";
@@ -55,7 +55,7 @@ impl core::fmt::Display for Units {
     }
 }
 
-/* ------------------------------------------------------------------------------ Configuration */
+/* ------------------------------------------------------------------------------- Configuration */
 
 /// Per-axis dataset configuration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -80,7 +80,7 @@ pub struct Config {
     pub c: Option<Units>,
 }
 
-/* ------------------------------------------------------------------------------ Format Enum */
+/* --------------------------------------------------------------------------------- Format Enum */
 
 /// File format encoding stored in the binary header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,7 +111,7 @@ pub struct Segment {
     /// Which table this segment belongs to.
     pub table: Table,
     /// Byte offset from the start of the file.
-    pub offset: u64,
+    pub offset: u64, // TODO Should we use `usize` instead of `u64` for byte offsets?
     /// Length in bytes.
     pub length: u64,
 }
@@ -141,7 +141,7 @@ impl Manifest {
     }
 }
 
-/* ---------------------------------------------------------------------------------- Header */
+/* -------------------------------------------------------------------------------------- Header */
 
 /// The 24-byte header at the start of every `.wr` file.
 ///

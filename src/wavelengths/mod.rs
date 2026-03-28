@@ -15,17 +15,18 @@ pub(super) mod record;
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
+use std::fs::File;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, LazyLock};
 
-use arrow::array::RecordBatch;
 use arrow::datatypes::DataType::{Float32, UInt16};
-use arrow::datatypes::{Field, Float32Type, Schema, UInt16Type};
+use arrow::datatypes::{Field, Schema};
 
 use self::builder::Builder;
 use self::record::Record;
 use crate::Error;
-use crate::util::col;
+use crate::format::Segment;
 use crate::writer::{Ipc, Writer};
 
 /* ------------------------------------------------------------------------------ Public Exports */
@@ -62,7 +63,7 @@ impl Wavelengths {
     /// Existing wavelengths are identified using [`find`]. New wavelengths are assigned the next
     /// sequentially available ID.
     pub fn push(&mut self, nms: &[f32]) -> Result<Vec<u16>, Error> {
-        let disk = read_records(&self.path, &self.segments)?;
+        let disk: Vec<Record> = read(&self.path, &self.segments)?;
         let ids: Vec<u16> = nms
             .iter()
             .map(|&nm| match find(nm, &self.pending, &disk) {
@@ -72,6 +73,13 @@ impl Wavelengths {
             .collect();
         self.ipc.try_flush()?;
         Ok(ids)
+    }
+
+    fn insert(&mut self, nm: f32) -> u16 {
+        let id = self.next.fetch_add(1, Ordering::SeqCst);
+        self.pending.push(Record::new(id, nm));
+        self.ipc.builder.push(id, nm);
+        id
     }
 
     /// Flush builder, finish stream, and extract the serialised bytes.
@@ -118,13 +126,13 @@ fn find(nm: f32, pending: &[Record], written: &[Record]) -> Option<u16> {
 }
 
 /// Eagerly decode [`Record`]s from the given wavelength [`Segment`]s on disk.
-pub(super) fn read<P, S>(path: P, mut segments: S) -> Result<Vec<Record>, Error>
+pub(super) fn read<P>(path: P, segments: &[Segment]) -> Result<Vec<Record>, Error>
 where
     P: AsRef<Path>,
-    S: Iterator<Item = Segment>,
 {
-    let mut records = Vec::new();
     let mut file = File::open(path)?;
+    let mut records = Vec::new();
+    let mut segments = segments.iter();
     'outer: while let Some(segment) = segments.next() {
         let mut stream = segment.stream(&mut file)?;
         'inner: while let Some(batch) = stream.next().transpose()? {
@@ -133,7 +141,7 @@ where
                 records.push(record);
             }
         }
-    };
+    }
     Ok(records)
 }
 

@@ -137,22 +137,6 @@ where
     Ok(records)
 }
 
-/// Extract [`Record`]s from [`RecordBatch`]es.
-pub(crate) fn decode(batches: &[RecordBatch]) -> Vec<Record> {
-    batches
-        .iter()
-        .flat_map(|batch| {
-            let ids = col::<UInt16Type>(batch, "id")
-                .expect("Batch does not contain 'id' column")
-                .values(); // SAFETY: ID values are guaranteed non-null
-            let nms = col::<Float32Type>(batch, "nm")
-                .expect("Batch does not contain 'nm' column")
-                .values(); // SAFETY: Wavelength values are guaranteed non-null
-            ids.iter().zip(nms).map(|(id, nm)| Record::new(*id, *nm))
-        })
-        .collect()
-}
-
 /* ----------------------------------------------------------------------- Trait Implementations */
 
 impl Writer for Wavelengths {

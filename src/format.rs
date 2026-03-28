@@ -99,7 +99,7 @@ pub struct Segment {
     /// Byte offset from the start of the file.
     pub offset: u64,
     /// Length in bytes.
-    pub length: u64,
+    pub length: usize,
 }
 
 /// Experiment-level metadata stored in every `.wr` file.

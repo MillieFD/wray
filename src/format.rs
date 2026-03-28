@@ -102,6 +102,16 @@ pub struct Segment {
     pub length: usize,
 }
 
+impl Segment {
+    pub(super) fn read(&self, file: &mut File) -> Result<Vec<u8>, Error> {
+        let mut buf = Vec::with_capacity(self.length);
+        // NOTE: File::read_at would be cleaner but is currently only supported on unix
+        file.seek(SeekFrom::Start(self.offset))?;
+        file.read_exact(&mut buf)?;
+        Ok(buf)
+    }
+}
+
 /// Experiment-level metadata stored in every `.wr` file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {

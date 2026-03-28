@@ -120,8 +120,8 @@ pub struct Manifest {
     pub timestamp: u64,
     /// Calibration measurement IDs.
     pub calibrations: Vec<u32>,
-    /// Per-axis dimension configuration.
-    pub axes: Config,
+    /// Dataset configuration.
+    pub cfg: Config,
     /// File segments containing intensity data
     pub intensities: Vec<Segment>,
     /// File segments containing measurements data.
@@ -136,7 +136,7 @@ impl Manifest {
         Self {
             timestamp,
             calibrations: Vec::with_capacity(8),
-            axes: cfg.clone(),
+            cfg: cfg.clone(),
             intensities: Vec::new(),
             measurements: Vec::new(),
             wavelengths: Vec::new(),

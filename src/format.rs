@@ -121,7 +121,7 @@ pub struct Segment {
 pub struct Manifest {
     /// Absolute dataset initialisation timestamp in microseconds relative to the UNIX epoch.
     pub timestamp: u64,
-    /// Measurement IDs that are calibration measurements.
+    /// Calibration measurement IDs.
     pub calibrations: Vec<u32>,
     /// Per-axis dimension configuration.
     pub axes: Config,

@@ -125,6 +125,31 @@ pub(crate) fn decode(batches: &[RecordBatch]) -> Result<Vec<Record>, Error> {
         (0..batch.num_rows()).for_each(|i| out.push(Record::new(ids.value(i), nms.value(i))));
         Ok(out)
     })
+/// Read the bytes for each entry in `segments` from disk.
+fn seg_bytes(file: &mut File, segments: &[Segment]) -> Result<Vec<u8>, Error> {
+    let total = segments.iter().map(|seg| seg.length).sum();
+    segments
+        .iter()
+        .try_fold(Vec::with_capacity(total), |mut acc, seg| {
+            acc.extend(seg.read(file)?);
+            Ok(acc)
+        })
+}
+
+/// Extract [`Record`]s from [`RecordBatch`]es.
+pub(crate) fn decode(batches: &[RecordBatch]) -> Vec<Record> {
+    batches
+        .iter()
+        .flat_map(|batch| {
+            let ids = col::<UInt16Type>(batch, "id")
+                .expect("Batch does not contain 'id' column")
+                .values(); // SAFETY: ID values are guaranteed non-null
+            let nms = col::<Float32Type>(batch, "nm")
+                .expect("Batch does not contain 'nm' column")
+                .values(); // SAFETY: Wavelength values are guaranteed non-null
+            ids.iter().zip(nms).map(|(id, nm)| Record::new(*id, *nm))
+        })
+        .collect()
 }
 
 /* ----------------------------------------------------------------------- Trait Implementations */

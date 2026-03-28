@@ -27,6 +27,19 @@ impl Record {
     pub(super) const fn new(id: u16, nm: f32) -> Self {
         Self { id, nm }
     }
+
+    /// Read a single [`Record`] from the [`RecordBatch`] at the specified `row` index.
+    ///
+    /// ### Panics
+    ///
+    /// - If the batch does not contain the required columns
+    /// - If the row index is out of bounds
+    pub(super) fn read(batch: &RecordBatch, row: usize) -> Result<Record, Error> {
+        Ok(Self {
+            id: col::<UInt16Type>(batch, "id")?.value(row),
+            nm: col::<Float32Type>(batch, "nm")?.value(row),
+        })
+    }
 }
 
 /* ----------------------------------------------------------------------- Trait Implementations */

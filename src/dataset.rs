@@ -14,7 +14,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use crate::format::{Config, HEADER, Header, Manifest, Segment, Table};
+use crate::format::{Config, HEADER, Header, Manifest, Segment};
 use crate::intensities::Intensities;
 use crate::measurements::Measurements;
 use crate::util::batches;
@@ -99,13 +99,6 @@ impl Dataset {
             });
         }
 
-        // Restore wavelength dedup cache — reads only wavelength segments.
-        let mut wl_batches = Vec::new();
-        for bytes in segment_streams(path.as_ref(), &manifest.segments, Table::Wavelengths)? {
-            wl_batches.extend(batches(&bytes)?);
-        }
-        let existing_wl = wavelengths::decode(&wl_batches)?;
-
         // Restore next measurement ID — reads only measurement segments.
         let mut ms_batches = Vec::new();
         for bytes in segment_streams(path.as_ref(), &manifest.segments, Table::Measurements)? {
@@ -179,17 +172,17 @@ impl Dataset {
 
     /// Read all wavelength records from the dataset.
     pub fn read_wavelengths(&self) -> Result<Vec<Wavelength>, Error> {
-        wavelengths::decode(&self.read_batches(Table::Wavelengths)?)
+        wavelengths::decode(&self.read_batches(&self.manifest.wavelengths)?)
     }
 
     /// Read all measurement records from the dataset.
     pub fn read_measurements(&self) -> Result<Vec<Measurement>, Error> {
-        measurements::decode(&self.read_batches(Table::Measurements)?)
+        measurements::decode(&self.read_batches(&self.manifest.measurements)?)
     }
 
     /// Read all intensity records from the dataset.
     pub fn read_intensities(&self) -> Result<Vec<Intensity>, Error> {
-        intensities::decode(&self.read_batches(Table::Intensities)?)
+        intensities::decode(&self.read_batches(&self.manifest.intensities)?)
     }
 
     /* ----------------------------------------------------------------------------- Write */
@@ -236,10 +229,10 @@ impl Dataset {
         })
     }
 
-    /// Decode all [`RecordBatch`]es for a table from disk segments.
-    fn read_batches(&self, table: Table) -> Result<Vec<arrow::array::RecordBatch>, Error> {
+    /// Decode all [`RecordBatch`]es from the given pre-filtered disk segments.
+    fn read_batches(&self, segments: &[Segment]) -> Result<Vec<arrow::array::RecordBatch>, Error> {
         let mut all = Vec::new();
-        for bytes in segment_streams(&self.path, &self.manifest.segments, table)? {
+        for bytes in read_all_segments(&self.path, segments)? {
             let decoded = match self.finished {
                 true => crate::util::file_batches(&bytes)?,
                 false => batches(&bytes)?,
@@ -330,23 +323,9 @@ impl Dataset {
 
     /// Consolidate all segments into Arrow IPC file format and write to `path`.
     fn write_finished(&self, path: &Path) -> Result<(), Error> {
-        let wl = consolidate::<Wavelengths>(&self.path, &self.manifest.segments, Table::Wavelengths)?;
-        let ms = consolidate::<Measurements>(&self.path, &self.manifest.segments, Table::Measurements)?;
-        let it = consolidate::<Intensities>(&self.path, &self.manifest.segments, Table::Intensities)?;
-
-        let mut segments = Vec::with_capacity(3);
-        let mut offset = HEADER as u64;
-
-        for (table, bytes) in [
-            (Table::Wavelengths, &wl),
-            (Table::Measurements, &ms),
-            (Table::Intensities, &it),
-        ] {
-            if !bytes.is_empty() {
-                segments.push(Segment { table, offset, length: bytes.len() as u64 });
-                offset += bytes.len() as u64;
-            }
-        }
+        let wl = consolidate::<Wavelengths>(&self.path, &self.manifest.wavelengths)?;
+        let ms = consolidate::<Measurements>(&self.path, &self.manifest.measurements)?;
+        let it = consolidate::<Intensities>(&self.path, &self.manifest.intensities)?;
 
         let mut manifest = self.manifest.clone();
         manifest.segments = segments;
@@ -391,23 +370,15 @@ fn read_segment(path: &Path, seg: &Segment) -> Result<Vec<u8>, Error> {
     Ok(buf)
 }
 
-/// Read each matching segment's bytes on demand from disk.
-fn segment_streams(path: &Path, segments: &[Segment], table: Table) -> Result<Vec<Vec<u8>>, Error> {
-    segments
-        .iter()
-        .filter(|s| s.table == table)
-        .map(|seg| read_segment(path, seg))
-        .collect()
+/// Read each segment's bytes from disk.
+fn read_all_segments(path: &Path, segments: &[Segment]) -> Result<Vec<Vec<u8>>, Error> {
+    segments.iter().map(|seg| read_segment(path, seg)).collect()
 }
 
-/// Read all batches for a table from disk and re-encode as Arrow IPC file format.
-fn consolidate<W: Writer>(
-    path: &Path,
-    segments: &[Segment],
-    table: Table,
-) -> Result<Vec<u8>, Error> {
+/// Read all batches from pre-filtered segments and re-encode as Arrow IPC file format.
+fn consolidate<W: Writer>(path: &Path, segments: &[Segment]) -> Result<Vec<u8>, Error> {
     let mut all = Vec::new();
-    for bytes in segment_streams(path, segments, table)? {
+    for bytes in read_all_segments(path, segments)? {
         all.extend(batches(&bytes)?);
     }
     if all.is_empty() {

@@ -93,23 +93,9 @@ pub enum Format {
 
 /* ------------------------------------------------------------------------------------ Manifest */
 
-/// Identifies which Arrow table a [`Segment`] belongs to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Table {
-    /// The wavelengths table.
-    Wavelengths,
-    /// The measurements table.
-    Measurements,
-    /// The intensities table.
-    Intensities,
-}
-
 /// A contiguous byte range of Arrow IPC data within the file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Segment {
-    /// Which table this segment belongs to.
-    pub table: Table,
     /// Byte offset from the start of the file.
     pub offset: u64,
     /// Length in bytes.
@@ -125,8 +111,12 @@ pub struct Manifest {
     pub calibrations: Vec<u32>,
     /// Per-axis dimension configuration.
     pub axes: Config,
-    /// Segment index — byte ranges for each table's IPC data.
-    pub segments: Vec<Segment>,
+    /// File segments containing intensity data
+    pub intensities: Vec<Segment>,
+    /// File segments containing measurements data.
+    pub measurements: Vec<Segment>,
+    /// File segments containing wavelength data.
+    pub wavelengths: Vec<Segment>,
 }
 
 impl Manifest {
@@ -136,7 +126,9 @@ impl Manifest {
             timestamp,
             calibrations: Vec::with_capacity(8),
             axes: cfg.clone(),
-            segments: Vec::new(),
+            intensities: Vec::new(),
+            measurements: Vec::new(),
+            wavelengths: Vec::new(),
         }
     }
 }

@@ -111,7 +111,7 @@ pub struct Segment {
     /// Which table this segment belongs to.
     pub table: Table,
     /// Byte offset from the start of the file.
-    pub offset: u64, // TODO Should we use `usize` instead of `u64` for byte offsets?
+    pub offset: u64,
     /// Length in bytes.
     pub length: u64,
 }

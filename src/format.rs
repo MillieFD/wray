@@ -18,7 +18,7 @@ use crate::Error;
 
 /* ----------------------------------------------------------------------------------- Constants */
 
-/// Magic bytes at the start of every `.wr` file.
+/// Magic bytes to identify the start of every `.wr` file.
 pub(super) const MAGIC: &[u8; 4] = b"WRAY";
 
 /// Current format version (major, minor, patch).

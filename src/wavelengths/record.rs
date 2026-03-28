@@ -24,7 +24,7 @@ pub struct Record {
 }
 
 impl Record {
-    pub(crate) const fn new(id: u16, nm: f32) -> Self {
+    pub(super) const fn new(id: u16, nm: f32) -> Self {
         Self { id, nm }
     }
 }

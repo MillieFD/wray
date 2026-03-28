@@ -34,11 +34,19 @@ impl Record {
     ///
     /// - If the batch does not contain the required columns
     /// - If the row index is out of bounds
-    pub(super) fn read(batch: &RecordBatch, row: usize) -> Result<Record, Error> {
-        Ok(Self {
-            id: col::<UInt16Type>(batch, "id")?.value(row),
-            nm: col::<Float32Type>(batch, "nm")?.value(row),
-        })
+    pub(super) fn read(batch: &RecordBatch, row: usize) -> Record {
+        Self {
+            id: batch
+                .column_by_name("id")
+                .expect("Wavelength Schema Violation: Batch does not contain 'id' column")
+                .as_primitive::<UInt16Type>()
+                .value(row),
+            nm: batch
+                .column_by_name("nm")
+                .expect("Wavelength Schema Violation: Batch does not contain 'nm' column")
+                .as_primitive::<Float32Type>()
+                .value(row),
+        }
     }
 }
 

@@ -168,23 +168,6 @@ impl Dataset {
         self.finished
     }
 
-    /* ------------------------------------------------------------------------------ Read */
-
-    /// Read all wavelength records from the dataset.
-    pub fn read_wavelengths(&self) -> Result<Vec<Wavelength>, Error> {
-        wavelengths::decode(&self.read_batches(&self.manifest.wavelengths)?)
-    }
-
-    /// Read all measurement records from the dataset.
-    pub fn read_measurements(&self) -> Result<Vec<Measurement>, Error> {
-        measurements::decode(&self.read_batches(&self.manifest.measurements)?)
-    }
-
-    /// Read all intensity records from the dataset.
-    pub fn read_intensities(&self) -> Result<Vec<Intensity>, Error> {
-        intensities::decode(&self.read_batches(&self.manifest.intensities)?)
-    }
-
     /* ----------------------------------------------------------------------------- Write */
 
     /// Flush and write the `.wr` file to disk. Sets `closed = true`.

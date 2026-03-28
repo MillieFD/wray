@@ -21,13 +21,13 @@ use crate::Error;
 /// Magic bytes to identify the start of every `.wr` file.
 pub(super) const MAGIC: &[u8; 4] = b"WRAY";
 
-/// Current format version (major, minor, patch).
-pub(super) const VERSION: [u8; 3] = [0, 2, 0];
+/// Format version number.
+pub(super) const VERSION: u16 = 1;
 
 /// Length (in bytes) of the fixed-size file header.
 ///
-/// Layout: `MAGIC(4) + VERSION(3) + FINISHED(1) + manifest_offset(8) + manifest_len(8) = 24`.
-pub(super) const HEADER: usize = 24;
+/// Layout: `MAGIC(4) + VERSION(2) + FINISHED(1) + manifest_offset(8) + manifest_len(8) = 23`.
+pub(super) const HEADER: usize = 23;
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
@@ -143,9 +143,9 @@ impl Manifest {
 
 /* -------------------------------------------------------------------------------------- Header */
 
-/// The 24-byte header at the start of every `.wr` file.
+/// The 23-byte header at the start of every `.wr` file.
 ///
-/// Layout: `MAGIC(4) + VERSION(3) + FINISHED(1) + manifest_offset(8) + manifest_len(8)`.
+/// Layout: `MAGIC(4) + VERSION(2) + FINISHED(1) + manifest_offset(8) + manifest_len(8)`.
 pub(crate) struct Header {
     /// Byte offset of the TOML manifest from the start of the file.
     pub manifest_offset: u64,
@@ -159,7 +159,7 @@ impl Header {
     /// Write the header to `w`.
     pub fn write<W: Write>(&self, w: &mut W) -> Result<(), Error> {
         w.write_all(MAGIC)?;
-        w.write_all(&VERSION)?;
+        w.write_all(&VERSION.to_le_bytes())?;
         w.write_all(&[u8::from(self.finished)])?;
         w.write_all(&self.manifest_offset.to_le_bytes())?;
         w.write_all(&self.manifest_len.to_le_bytes())?;
@@ -173,16 +173,14 @@ impl Header {
         if &buf[0..4] != MAGIC {
             return Err(Error::InvalidFormat("invalid magic bytes".into()));
         }
-        if buf[4] != VERSION[0] {
-            return Err(Error::InvalidFormat(format!(
-                "unsupported version: {}.{}.{}",
-                buf[4], buf[5], buf[6]
-            )));
+        let version = u16::from_le_bytes(buf[4..6].try_into().expect("2 bytes"));
+        if version != VERSION {
+            return Err(Error::InvalidFormat(format!("unsupported version: {version}")));
         }
         Ok(Self {
-            finished: buf[7] != 0,
-            manifest_offset: u64::from_le_bytes(buf[8..16].try_into().expect("8 bytes")),
-            manifest_len: u64::from_le_bytes(buf[16..24].try_into().expect("8 bytes")),
+            finished: buf[6] != 0,
+            manifest_offset: u64::from_le_bytes(buf[7..15].try_into().expect("8 bytes")),
+            manifest_len: u64::from_le_bytes(buf[15..23].try_into().expect("8 bytes")),
         })
     }
 }

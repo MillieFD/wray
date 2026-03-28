@@ -19,15 +19,15 @@ use crate::Error;
 /* ----------------------------------------------------------------------------------- Constants */
 
 /// Magic bytes at the start of every `.wr` file.
-pub(crate) const MAGIC: &[u8; 4] = b"WRAY";
+pub(super) const MAGIC: &[u8; 4] = b"WRAY";
 
 /// Current format version (major, minor, patch).
-pub(crate) const VERSION: [u8; 3] = [0, 2, 0];
+pub(super) const VERSION: [u8; 3] = [0, 2, 0];
 
 /// Length (in bytes) of the fixed-size file header.
 ///
 /// Layout: `MAGIC(4) + VERSION(3) + FINISHED(1) + manifest_offset(8) + manifest_len(8) = 24`.
-pub(crate) const HEADER: usize = 24;
+pub(super) const HEADER: usize = 24;
 
 /* ------------------------------------------------------------------------------ Public Exports */
 

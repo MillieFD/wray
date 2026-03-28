@@ -117,23 +117,24 @@ fn find(nm: f32, pending: &[Record], written: &[Record]) -> Option<u16> {
         .map(|r| r.id)
 }
 
-/// Extract [`Record`]s from pre-decoded [`RecordBatch`]es.
-pub(crate) fn decode(batches: &[RecordBatch]) -> Result<Vec<Record>, Error> {
-    batches.iter().try_fold(Vec::new(), |mut out, batch| {
-        let ids = col::<UInt16Type>(batch, "id")?;
-        let nms = col::<Float32Type>(batch, "nm")?;
-        (0..batch.num_rows()).for_each(|i| out.push(Record::new(ids.value(i), nms.value(i))));
-        Ok(out)
-    })
-/// Read the bytes for each entry in `segments` from disk.
-fn seg_bytes(file: &mut File, segments: &[Segment]) -> Result<Vec<u8>, Error> {
-    let total = segments.iter().map(|seg| seg.length).sum();
-    segments
-        .iter()
-        .try_fold(Vec::with_capacity(total), |mut acc, seg| {
-            acc.extend(seg.read(file)?);
-            Ok(acc)
-        })
+/// Eagerly decode [`Record`]s from the given wavelength [`Segment`]s on disk.
+pub(super) fn read<P, S>(path: P, mut segments: S) -> Result<Vec<Record>, Error>
+where
+    P: AsRef<Path>,
+    S: Iterator<Item = Segment>,
+{
+    let mut records = Vec::new();
+    let mut file = File::open(path)?;
+    'outer: while let Some(segment) = segments.next() {
+        let mut stream = segment.stream(&mut file)?;
+        'inner: while let Some(batch) = stream.next().transpose()? {
+            for row in 0..batch.num_rows() {
+                let record = Record::read(&batch, row);
+                records.push(record);
+            }
+        }
+    };
+    Ok(records)
 }
 
 /// Extract [`Record`]s from [`RecordBatch`]es.

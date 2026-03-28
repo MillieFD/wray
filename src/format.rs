@@ -119,7 +119,7 @@ pub struct Segment {
 /// Experiment-level metadata stored in every `.wr` file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
-    /// Absolute UNIX epoch timestamp in microseconds when the dataset was created.
+    /// Absolute dataset initialisation timestamp in microseconds relative to the UNIX epoch.
     pub timestamp: u64,
     /// Measurement IDs that are calibration measurements.
     pub calibrations: Vec<u32>,

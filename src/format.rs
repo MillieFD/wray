@@ -11,9 +11,10 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 /* ----------------------------------------------------------------------------- Private Imports */
 
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{BufReader, Read, Seek, SeekFrom, Take, Write};
 
-use serde::{Deserialize, Serialize};
+use arrow::ipc::reader::StreamReader;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::Error;
 
@@ -95,21 +96,49 @@ pub enum Format {
 /* ------------------------------------------------------------------------------------ Manifest */
 
 /// A contiguous byte range of Arrow IPC data within the file.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Segment {
     /// Byte offset from the start of the file.
-    pub offset: u64,
+    pub offset: SeekFrom,
     /// Length in bytes.
-    pub length: usize,
+    pub length: u64,
+}
+
+pub(super) type Stream<'a> = StreamReader<BufReader<Take<&'a mut File>>>;
+
+impl Segment {
+    pub(super) fn stream<'a>(&self, file: &'a mut File) -> Result<Stream<'a>, Error> {
+        file.seek(self.offset)?;
+        let view = file.take(self.length); // zero-copy window into the file
+        Ok(StreamReader::try_new_buffered(view, None)?) // buffer reduces syscall overhead
+    }
 }
 
 impl Segment {
-    pub(super) fn read(&self, file: &mut File) -> Result<Vec<u8>, Error> {
-        let mut buf = Vec::with_capacity(self.length);
-        // NOTE: File::read_at would be cleaner but is currently only supported on unix
-        file.seek(SeekFrom::Start(self.offset))?;
-        file.read_exact(&mut buf)?;
-        Ok(buf)
+    /// Byte offset past the last byte of this segment.
+    pub fn end(&self) -> u64 {
+        let SeekFrom::Start(off) = self.offset else { panic!("Offset is not SeekFrom::Start") };
+        off + self.length
+    }
+}
+
+impl Serialize for Segment {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let SeekFrom::Start(offset) = self.offset else {
+            use serde::ser::Error;
+            return Err(Error::custom("Segment offset is not SeekFrom::Start"));
+        };
+        (offset, self.length).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Segment {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let (offset, length) = <(u64, u64)>::deserialize(deserializer)?;
+        Ok(Self {
+            offset: SeekFrom::Start(offset),
+            length,
+        })
     }
 }
 

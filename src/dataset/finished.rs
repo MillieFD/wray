@@ -35,22 +35,9 @@ pub struct Dataset {
 }
 
 impl Dataset {
-    /// Borrow the experiment metadata.
-    pub const fn manifest(&self) -> &Manifest {
-        &self.manifest
-    }
-}
-
-/* ----------------------------------------------------------------------- Trait Implementations */
-
-impl TryFrom<Manifest> for Dataset {
-    type Error = Error;
-
     /// Construct a finished dataset from a [`Manifest`].
-    ///
-    /// The manifest's [`path`](Manifest::path) field must be set before calling;
-    /// [`read_header`](super::read_header) sets it automatically.
-    fn try_from(manifest: Manifest) -> Result<Self, Self::Error> {
+    pub fn new(manifest: Manifest) -> Result<Self, Error> {
+        // TODO Tidy up field constructors
         let wavelengths = Wavelengths::new(&manifest.path, manifest.wavelengths.clone(), false)?;
         let measurements = Measurements::new(
             &manifest.path,
@@ -66,5 +53,20 @@ impl TryFrom<Manifest> for Dataset {
             intensities,
             manifest,
         })
+    }
+
+    /// Borrow the experiment metadata.
+    pub const fn manifest(&self) -> &Manifest {
+        &self.manifest
+    }
+}
+
+/* ----------------------------------------------------------------------- Trait Implementations */
+
+impl TryFrom<Manifest> for Dataset {
+    type Error = Error;
+
+    fn try_from(manifest: Manifest) -> Result<Self, Self::Error> {
+        Self::new(manifest)
     }
 }

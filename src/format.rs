@@ -198,7 +198,6 @@ pub struct Manifest {
 impl Manifest {
     /// Create a new [`Manifest`] for the given file `path`, creation timestamp, and [`Config`].
     pub(crate) fn new(path: impl AsRef<Path>, timestamp: u64, cfg: &Config) -> Self {
-        let path = path.as_ref().to_path_buf();
         Self {
             timestamp,
             calibrations: Vec::with_capacity(8),
@@ -206,7 +205,7 @@ impl Manifest {
             intensities: Vec::new(),
             measurements: Vec::new(),
             wavelengths: Vec::new(),
-            path,
+            path: path.as_ref().to_path_buf(),
         }
     }
 }

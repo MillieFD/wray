@@ -10,6 +10,9 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 use std::fmt::{Display, Formatter};
 
+use arrow::array::{AsArray, RecordBatch};
+use arrow::datatypes::{Float32Type, UInt16Type};
+
 /* ------------------------------------------------------------------------------ Public Exports */
 
 /// A single wavelength entry.

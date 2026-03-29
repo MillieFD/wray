@@ -24,12 +24,12 @@ use crate::Error;
 pub(super) const MAGIC: &[u8; 4] = b"WRAY";
 
 /// Format version number.
-pub(super) const VERSION: u16 = 1;
+pub(super) const VERSION: u8 = 1;
 
 /// Length (in bytes) of the fixed-size file header.
 ///
-/// Layout: `MAGIC(4) + VERSION(2) + FINISHED(1) + manifest_offset(8) + manifest_len(8) = 23`.
-pub(super) const HEADER: usize = 23;
+/// Layout: `MAGIC(4) + manifest_offset(8) + manifest_len(8) + VERSION(1) + file_type(1) = 22`.
+pub(super) const HEADER: usize = 22;
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
@@ -84,13 +84,39 @@ pub struct Config {
 
 /* --------------------------------------------------------------------------------- Format Enum */
 
-/// File format encoding stored in the binary header.
+/// File type stored in the binary header.
+///
+/// Encoded as a single byte (`u8`) in the file header.
+/// `0` = [`Unfinished`](Format::Unfinished), `1` = [`Finished`](Format::Finished).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
     /// Arrow IPC stream format — supports reading and appending.
     Unfinished,
     /// Arrow IPC file format — compression and random-access reads.
     Finished,
+}
+
+impl From<Format> for u8 {
+    fn from(f: Format) -> Self {
+        match f {
+            Format::Unfinished => 0,
+            Format::Finished => 1,
+        }
+    }
+}
+
+impl TryFrom<u8> for Format {
+    type Error = crate::Error;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::Unfinished),
+            1 => Ok(Self::Finished),
+            _ => Err(crate::Error::InvalidFormat(format!(
+                "unknown file type: {value}"
+            ))),
+        }
+    }
 }
 
 /* ------------------------------------------------------------------------------------ Manifest */
@@ -180,26 +206,26 @@ impl Manifest {
 
 /* -------------------------------------------------------------------------------------- Header */
 
-/// The 23-byte header at the start of every `.wr` file.
+/// The 22-byte header at the start of every `.wr` file.
 ///
-/// Layout: `MAGIC(4) + VERSION(2) + FINISHED(1) + manifest_offset(8) + manifest_len(8)`.
+/// Layout: `MAGIC(4) + manifest_offset(8) + manifest_len(8) + VERSION(1) + file_type(1)`.
 pub(crate) struct Header {
     /// Byte offset of the TOML manifest from the start of the file.
     pub manifest_offset: u64,
     /// Length of the TOML manifest in bytes.
     pub manifest_len: u64,
-    /// Whether the file uses the finished (Arrow file) format.
-    pub finished: bool,
+    /// File type (stream or sealed file format).
+    pub format: Format,
 }
 
 impl Header {
     /// Write the header to `w`.
     pub fn write<W: Write>(&self, w: &mut W) -> Result<(), Error> {
         w.write_all(MAGIC)?;
-        w.write_all(&VERSION.to_le_bytes())?;
-        w.write_all(&[u8::from(self.finished)])?;
         w.write_all(&self.manifest_offset.to_le_bytes())?;
         w.write_all(&self.manifest_len.to_le_bytes())?;
+        w.write_all(&[VERSION])?;
+        w.write_all(&[u8::from(self.format)])?;
         Ok(())
     }
 
@@ -210,14 +236,17 @@ impl Header {
         if &buf[0..4] != MAGIC {
             return Err(Error::InvalidFormat("invalid magic bytes".into()));
         }
-        let version = u16::from_le_bytes(buf[4..6].try_into().expect("2 bytes"));
+        let manifest_offset = u64::from_le_bytes(buf[4..12].try_into().expect("8 bytes"));
+        let manifest_len = u64::from_le_bytes(buf[12..20].try_into().expect("8 bytes"));
+        let version = buf[20];
         if version != VERSION {
             return Err(Error::InvalidFormat(format!("unsupported version: {version}")));
         }
+        let format = Format::try_from(buf[21])?;
         Ok(Self {
-            finished: buf[6] != 0,
-            manifest_offset: u64::from_le_bytes(buf[7..15].try_into().expect("8 bytes")),
-            manifest_len: u64::from_le_bytes(buf[15..23].try_into().expect("8 bytes")),
+            manifest_offset,
+            manifest_len,
+            format,
         })
     }
 }

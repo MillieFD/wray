@@ -19,7 +19,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 use crate::Error;
-use crate::format::{Header, Manifest};
+use crate::format::{Format, Header, Manifest};
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
@@ -48,9 +48,11 @@ impl Dataset {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
         let path = path.as_ref();
         let (header, manifest) = read_header(path)?;
-        match header.finished {
-            true => finished::Dataset::new(path.to_path_buf(), manifest).map(Self::Finished),
-            false => {
+        match header.format {
+            Format::Finished => {
+                finished::Dataset::new(path.to_path_buf(), manifest).map(Self::Finished)
+            }
+            Format::Unfinished => {
                 unfinished::Dataset::from_manifest(path.to_path_buf(), manifest)
                     .map(Self::Unfinished)
             }

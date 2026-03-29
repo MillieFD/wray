@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::Error;
-use crate::format::{Config, HEADER, Header, Manifest, Segment};
+use crate::format::{Config, Format, HEADER, Header, Manifest, Segment};
 use crate::intensities::Intensities;
 use crate::measurements::Measurements;
 use crate::measurements::record::Record as MsRecord;
@@ -66,7 +66,7 @@ impl Dataset {
         match path.exists() {
             true => {
                 let (header, manifest) = super::read_header(path)?;
-                if header.finished {
+                if header.format != Format::Unfinished {
                     return Err(Error::InvalidFormat(
                         "cannot append to finished dataset".into(),
                     ));
@@ -242,7 +242,7 @@ impl Dataset {
         let header = Header {
             manifest_offset: offset,
             manifest_len: manifest_bytes.len() as u64,
-            finished: false,
+            format: Format::Unfinished,
         };
 
         let existing = match existing_end > HEADER as u64 {
@@ -314,7 +314,7 @@ impl Dataset {
         let header = Header {
             manifest_offset: offset,
             manifest_len: manifest_bytes.len() as u64,
-            finished: true,
+            format: Format::Finished,
         };
 
         let mut file = std::fs::File::create(path)?;

@@ -14,27 +14,35 @@ and a UTF-8 TOML manifest.
 Offset  Size     Contents
 ──────  ───────  ──────────────────────────────────────
 0       4        Magic bytes: b"WRAY"
-4       4        Format version: u32 LE = 1
-8       8        manifest_len: u64 LE
-16      8        wavelengths_len: u64 LE
-24      8        measurements_len: u64 LE
-32      8        intensities_len: u64 LE
-40      M        Manifest (UTF-8 TOML, manifest_len bytes)
-40+M    W        Wavelengths Arrow IPC stream (wavelengths_len bytes)
-40+M+W  S        Measurements Arrow IPC stream (measurements_len bytes)
-40+M+W+S I      Intensities Arrow IPC stream (intensities_len bytes)
+4       8        manifest_offset: u64 LE
+12      8        manifest_len: u64 LE
+20      1        Format version: u8 = 1
+21      1        File type: u8 (0 = Unfinished, 1 = Finished)
+22      …        Arrow IPC segments (one or more)
+22+…    M        Manifest (UTF-8 TOML, manifest_len bytes)
 ```
 
-The header is exactly **40 bytes**. Section byte ranges are derived sequentially:
+The header is exactly **22 bytes**. The manifest is located at
+`manifest_offset` from the start of the file and is `manifest_len` bytes long.
 
-| Section       | Start          | Length             |
-|---------------|----------------|--------------------|
-| Manifest      | 40             | `manifest_len`     |
-| Wavelengths   | 40 + M         | `wavelengths_len`  |
-| Measurements  | 40 + M + W     | `measurements_len` |
-| Intensities   | 40 + M + W + S | `intensities_len`  |
+| Field             | Offset | Size | Description                                        |
+|-------------------|--------|------|----------------------------------------------------|
+| Magic bytes       | 0      | 4 B  | `b"WRAY"` — identifies the file type              |
+| `manifest_offset` | 4      | 8 B  | Byte offset of the TOML manifest from file start   |
+| `manifest_len`    | 12     | 8 B  | Length of the TOML manifest in bytes               |
+| Format version    | 20     | 1 B  | `1` — readers must reject unknown versions         |
+| File type         | 21     | 1 B  | `0` = Unfinished (stream), `1` = Finished (file)  |
 
 All multi-byte integers are **little-endian**.
+
+### File Types
+
+| Value | Name         | Description                                                |
+|-------|--------------|------------------------------------------------------------|
+| `0`   | `Unfinished` | Arrow IPC **stream** format — supports reading and appending |
+| `1`   | `Finished`   | Arrow IPC **file** format — compression and random-access reads |
+
+Additional file types may be defined in future format versions.
 
 ---
 
@@ -44,7 +52,6 @@ All multi-byte integers are **little-endian**.
 version = 1.0
 timestamp = 1742345678901234   # Absolute UNIX epoch microseconds (i64)
 calibrations = [3, 7]          # Measurement IDs flagged as calibrations
-finished = false               # True only when explicitly finalised
 
 [units]
 x = "mm"                       # Valid: "nm", "um", "mm", "m"
@@ -55,10 +62,8 @@ a = "deg"                      # Valid: "deg", "rad"
 
 | Key               | Type       | Description                                              |
 |-------------------|------------|----------------------------------------------------------|
-| `version`         | `f64`      | Format version. Readers must reject unknown versions.    |
 | `timestamp`       | `i64`      | UNIX epoch in microseconds when the dataset was created. |
 | `calibrations`    | `[u32]`    | Measurement IDs that are calibration measurements.       |
-| `finished`        | `bool`     | Whether the experiment was explicitly finalised.         |
 | `units.x`         | `string?`  | Storage unit for x coordinate axis (omitted if unused).  |
 | `units.y`         | `string?`  | Storage unit for y coordinate axis.                      |
 | `units.z`         | `string?`  | Storage unit for z coordinate axis.                      |
@@ -103,10 +108,10 @@ record batch. Each stream ends with the standard 8-byte EOS sentinel
 
 ## 4. Version Upgrade Policy
 
-Readers **must** check `manifest.version` and reject versions they do not
-understand. New minor-version additions (new optional manifest keys, new
-nullable columns) should preserve backwards compatibility. Major-version
-changes may alter the header layout or schema.
+Readers **must** check the format version byte (offset 20) and reject versions
+they do not understand. New minor-version additions (new optional manifest
+keys, new nullable columns) should preserve backwards compatibility.
+Major-version changes may alter the header layout or schema.
 
 ---
 
@@ -115,6 +120,6 @@ changes may alter the header layout or schema.
 - All Arrow types are standard primitives — no extension types or
   language-specific encodings.
 - The manifest is UTF-8 TOML, parseable in every major language.
-- The 40-byte header uses fixed-width little-endian integers, trivial
+- The 22-byte header uses fixed-width little-endian integers, trivial
   to parse with `seek` + `read`.
 - All section offsets are in the header — no seek-and-scan required.

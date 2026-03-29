@@ -13,6 +13,7 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom, Take, Write};
 use std::mem::size_of;
+use std::path::PathBuf;
 
 use arrow::ipc::reader::StreamReader;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -90,10 +91,7 @@ pub struct Config {
 
 /* --------------------------------------------------------------------------------- Format Enum */
 
-/// File type stored in the binary header.
-///
-/// Encoded as a single byte (`u8`) in the file header.
-/// `0` = [`Unfinished`](Format::Unfinished), `1` = [`Finished`](Format::Finished).
+/// File type stored as a single byte (`u8`) in the binary header.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Format {
     /// Arrow IPC stream format — supports reading and appending.
@@ -192,11 +190,14 @@ pub struct Manifest {
     pub measurements: Vec<Segment>,
     /// File segments containing wavelength data.
     pub wavelengths: Vec<Segment>,
+    /// Path to the `.wr` file on disk. Not serialised to TOML.
+    #[serde(skip)]
+    pub path: PathBuf,
 }
 
 impl Manifest {
-    /// Create a new [`Manifest`] for the given creation timestamp and [`Config`].
-    pub(crate) fn new(timestamp: u64, cfg: &Config) -> Self {
+    /// Create a new [`Manifest`] for the given file `path`, creation timestamp, and [`Config`].
+    pub(crate) fn new(path: PathBuf, timestamp: u64, cfg: &Config) -> Self {
         Self {
             timestamp,
             calibrations: Vec::with_capacity(8),
@@ -204,6 +205,7 @@ impl Manifest {
             intensities: Vec::new(),
             measurements: Vec::new(),
             wavelengths: Vec::new(),
+            path,
         }
     }
 }

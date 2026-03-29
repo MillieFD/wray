@@ -50,10 +50,10 @@ impl Dataset {
         let (header, manifest) = read_header(path)?;
         match header.format {
             Format::Finished => {
-                finished::Dataset::new(path, manifest).map(Self::Finished)
+                finished::Dataset::try_from(manifest).map(Self::Finished)
             }
             Format::Unfinished => {
-                unfinished::Dataset::from_manifest(path, manifest).map(Self::Unfinished)
+                unfinished::Dataset::try_from(manifest).map(Self::Unfinished)
             }
         }
     }
@@ -84,6 +84,7 @@ pub(crate) fn read_header(path: &Path) -> Result<(Header, Manifest), Error> {
     file.seek(header.manifest.offset)?;
     let mut buf = vec![0u8; header.manifest.length as usize];
     file.read_exact(&mut buf)?;
-    let manifest: Manifest = toml::from_str(std::str::from_utf8(&buf)?)?;
+    let mut manifest: Manifest = toml::from_str(std::str::from_utf8(&buf)?)?;
+    manifest.path = path.to_path_buf();
     Ok((header, manifest))
 }

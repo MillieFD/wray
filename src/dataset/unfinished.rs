@@ -11,7 +11,7 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 /* ----------------------------------------------------------------------------- Private Imports */
 
 use std::io::{Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::SystemTime;
 
 use crate::Error;
@@ -21,7 +21,6 @@ use crate::measurements::Measurements;
 use crate::measurements::record::Record as MsRecord;
 use crate::table::{self, Sink};
 use crate::wavelengths::Wavelengths;
-
 /* ------------------------------------------------------------------------------ Public Exports */
 
 /// A writable `.wr` dataset backed by Arrow IPC stream segments.
@@ -36,9 +35,7 @@ use crate::wavelengths::Wavelengths;
 /// 5. Seal with [`finish`](Self::finish) for read-only access, or create a
 ///    snapshot with [`snapshot`](Self::snapshot).
 pub struct Dataset {
-    /// File path.
-    path: PathBuf,
-    /// Experiment metadata.
+    /// Experiment metadata (includes the file path).
     manifest: Manifest,
     /// Wavelengths table.
     pub wavelengths: Wavelengths,
@@ -71,7 +68,7 @@ impl Dataset {
                         "cannot append to finished dataset",
                     ));
                 }
-                Self::from_manifest(path.to_path_buf(), manifest)
+                Self::try_from(manifest)
             }
             false => Self::create(path, cfg),
         }
@@ -110,10 +107,10 @@ impl Dataset {
     /// Returns [`Error`] if the file cannot be written or consolidated.
     pub fn finish(mut self) -> Result<super::finished::Dataset, Error> {
         self.write_segmented()?;
-        let path = self.path.clone();
+        let path = self.manifest.path.clone();
         let manifest = self.write_finished(&path)?;
         self.closed = true;
-        super::finished::Dataset::new(path, manifest)
+        super::finished::Dataset::try_from(manifest)
     }
 
     /// Consolidate to a **new** file at `path`, leaving the original appendable.
@@ -129,34 +126,11 @@ impl Dataset {
         path: impl AsRef<Path>,
     ) -> Result<super::finished::Dataset, Error> {
         self.write_to_disk()?;
-        let path = path.as_ref().to_path_buf();
-        let manifest = self.write_finished(&path)?;
-        super::finished::Dataset::new(path, manifest)
+        let manifest = self.write_finished(path.as_ref())?;
+        super::finished::Dataset::try_from(manifest)
     }
 
     /* ---------------------------------------------------------------------------- Private */
-
-    /// Construct from a pre-read [`Manifest`] (used by [`new`](Self::new) and
-    /// [`Dataset::open`](super::Dataset::open)).
-    pub(crate) fn from_manifest(path: impl AsRef<Path>, manifest: Manifest) -> Result<Self, Error> {
-        let path = path.as_ref().to_path_buf();
-        let records: Vec<MsRecord> = table::read_stream(&path, &manifest.measurements)?;
-        let next_id = records.iter().map(|r| r.id).max().map_or(0, |id| id + 1);
-        Ok(Self {
-            wavelengths: Wavelengths::new(path.clone(), manifest.wavelengths.clone(), true)?,
-            measurements: Measurements::new(
-                path.clone(),
-                manifest.measurements.clone(),
-                true,
-                manifest.timestamp,
-                next_id,
-            )?,
-            intensities: Intensities::new(path.clone(), manifest.intensities.clone(), true)?,
-            path,
-            manifest,
-            closed: false,
-        })
-    }
 
     /// Create a brand-new dataset.
     fn create(path: &Path, cfg: &Config) -> Result<Self, Error> {
@@ -166,18 +140,14 @@ impl Dataset {
             .as_micros()
             .try_into()
             .expect("microsecond timestamp exceeds u64");
-        let manifest = Manifest::new(timestamp, cfg);
+        let manifest = Manifest::new(path.to_path_buf(), timestamp, cfg);
+        let wavelengths = Wavelengths::new(path, Vec::new(), true)?;
+        let measurements = Measurements::new(path, Vec::new(), true, timestamp, 0)?;
+        let intensities = Intensities::new(path, Vec::new(), true)?;
         Ok(Self {
-            wavelengths: Wavelengths::new(path.to_path_buf(), Vec::new(), true)?,
-            measurements: Measurements::new(
-                path.to_path_buf(),
-                Vec::new(),
-                true,
-                timestamp,
-                0,
-            )?,
-            intensities: Intensities::new(path.to_path_buf(), Vec::new(), true)?,
-            path: path.to_path_buf(),
+            wavelengths,
+            measurements,
+            intensities,
             manifest,
             closed: false,
         })
@@ -250,7 +220,7 @@ impl Dataset {
 
         let existing = match existing_end > HEADER as u64 {
             true => {
-                let mut src = std::fs::File::open(&self.path)?;
+                let mut src = std::fs::File::open(&self.manifest.path)?;
                 src.seek(SeekFrom::Start(HEADER as u64))?;
                 let len = (existing_end - HEADER as u64) as usize;
                 let mut buf = vec![0u8; len];
@@ -260,7 +230,7 @@ impl Dataset {
             false => Vec::new(),
         };
 
-        let mut file = std::fs::File::create(&self.path)?;
+        let mut file = std::fs::File::create(&self.manifest.path)?;
         header.write(&mut file)?;
         std::io::Write::write_all(&mut file, &existing)?;
         std::io::Write::write_all(&mut file, &new_wl)?;
@@ -277,7 +247,8 @@ impl Dataset {
 
     /// Consolidate all segments into Arrow IPC file format and write to `path`.
     ///
-    /// Returns the [`Manifest`] for the finished file.
+    /// Returns the [`Manifest`] for the finished file, with its
+    /// [`path`](Manifest::path) field set to `path`.
     fn write_finished(&self, path: &Path) -> Result<Manifest, Error> {
         let wl = self.wavelengths.finish()?;
         let ms = self.measurements.finish()?;
@@ -329,11 +300,41 @@ impl Dataset {
         std::io::Write::write_all(&mut file, &it)?;
         std::io::Write::write_all(&mut file, manifest_bytes)?;
 
+        manifest.path = path.to_path_buf();
         Ok(manifest)
     }
 }
 
 /* ----------------------------------------------------------------------- Trait Implementations */
+
+impl TryFrom<Manifest> for Dataset {
+    type Error = Error;
+
+    /// Construct from a pre-read [`Manifest`].
+    ///
+    /// The manifest's [`path`](Manifest::path) field must be set before calling;
+    /// [`read_header`](super::read_header) sets it automatically.
+    fn try_from(manifest: Manifest) -> Result<Self, Self::Error> {
+        let records: Vec<MsRecord> = table::read_stream(&manifest.path, &manifest.measurements)?;
+        let next_id = records.iter().map(|r| r.id).max().map_or(0, |id| id + 1);
+        let wavelengths = Wavelengths::new(&manifest.path, manifest.wavelengths.clone(), true)?;
+        let measurements = Measurements::new(
+            &manifest.path,
+            manifest.measurements.clone(),
+            true,
+            manifest.timestamp,
+            next_id,
+        )?;
+        let intensities = Intensities::new(&manifest.path, manifest.intensities.clone(), true)?;
+        Ok(Self {
+            wavelengths,
+            measurements,
+            intensities,
+            manifest,
+            closed: false,
+        })
+    }
+}
 
 impl Drop for Dataset {
     fn drop(&mut self) {

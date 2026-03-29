@@ -10,8 +10,6 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
-use std::path::Path;
-
 use crate::Error;
 use crate::format::Manifest;
 use crate::intensities::Intensities;
@@ -37,25 +35,36 @@ pub struct Dataset {
 }
 
 impl Dataset {
-    /// Construct a finished dataset from a path and pre-read [`Manifest`].
-    pub(crate) fn new(path: impl AsRef<Path>, manifest: Manifest) -> Result<Self, Error> {
-        let path = path.as_ref().to_path_buf();
-        Ok(Self {
-            wavelengths: Wavelengths::new(path.clone(), manifest.wavelengths.clone(), false)?,
-            measurements: Measurements::new(
-                path.clone(),
-                manifest.measurements.clone(),
-                false,
-                manifest.timestamp,
-                0,
-            )?,
-            intensities: Intensities::new(path, manifest.intensities.clone(), false)?,
-            manifest,
-        })
-    }
-
     /// Borrow the experiment metadata.
     pub const fn manifest(&self) -> &Manifest {
         &self.manifest
+    }
+}
+
+/* ----------------------------------------------------------------------- Trait Implementations */
+
+impl TryFrom<Manifest> for Dataset {
+    type Error = Error;
+
+    /// Construct a finished dataset from a [`Manifest`].
+    ///
+    /// The manifest's [`path`](Manifest::path) field must be set before calling;
+    /// [`read_header`](super::read_header) sets it automatically.
+    fn try_from(manifest: Manifest) -> Result<Self, Self::Error> {
+        let wavelengths = Wavelengths::new(&manifest.path, manifest.wavelengths.clone(), false)?;
+        let measurements = Measurements::new(
+            &manifest.path,
+            manifest.measurements.clone(),
+            false,
+            manifest.timestamp,
+            0,
+        )?;
+        let intensities = Intensities::new(&manifest.path, manifest.intensities.clone(), false)?;
+        Ok(Self {
+            wavelengths,
+            measurements,
+            intensities,
+            manifest,
+        })
     }
 }

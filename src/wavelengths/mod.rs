@@ -11,12 +11,11 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 /* ------------------------------------------------------------------------------------- Modules */
 
 mod builder;
-pub(super) mod record;
+pub(crate) mod record;
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
-use std::fs::File;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, LazyLock};
 
@@ -27,14 +26,19 @@ use self::builder::Builder;
 use self::record::Record;
 use crate::Error;
 use crate::format::Segment;
-use crate::writer::{Ipc, Writer};
+use crate::table::{self, Ipc, Sink};
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
 /// Abstraction over the wavelengths table.
+///
+/// Deduplication is performed against both the current write cycle's [`pending`]
+/// records and the previously written on-disk segments, which are read on each
+/// [`push`](Wavelengths::push) call. Only the small set of wavelengths added
+/// since the last flush is held in memory at any time.
 pub struct Wavelengths {
-    /// Shared IPC stream and builder.
-    ipc: Ipc<Builder>,
+    /// IPC stream writer (`None` when read-only).
+    ipc: Option<Ipc<Builder>>,
     /// Next available wavelength ID.
     next: AtomicU16,
     /// Path to the dataset file.
@@ -46,112 +50,125 @@ pub struct Wavelengths {
 }
 
 impl Wavelengths {
-    /// Create a new wavelengths table, optionally pre-populated with existing records.
-    pub fn new(records: Vec<Record>) -> Result<Self, Error> {
-        let next = records.iter().map(|r| r.id).max().map_or(0, |id| id + 1);
-        Ok(Self {
-            ipc: Ipc::new(Self::new_stream()?, Self::schema(), Builder::new()),
-            next: AtomicU16::new(next),
-            records,
-        })
+    /// Create or open a wavelengths table for the dataset at `path`.
+    ///
+    /// When `writable` is `true`, an IPC stream writer is initialised and the
+    /// next available ID is restored from existing on-disk records.
+    pub(crate) fn new(
+        path: PathBuf,
+        segments: Vec<Segment>,
+        writable: bool,
+    ) -> Result<Self, Error> {
+        if writable {
+            let existing: Vec<Record> = table::read_stream(&path, &segments)?;
+            let next = existing.iter().map(|r| r.id).max().map_or(0, |id| id + 1);
+            Ok(Self {
+                ipc: Some(Ipc::new(Self::new_stream()?, Self::schema(), Builder::new())),
+                next: AtomicU16::new(next),
+                path,
+                segments,
+                pending: Vec::new(),
+            })
+        } else {
+            Ok(Self {
+                ipc: None,
+                next: AtomicU16::new(0),
+                path,
+                segments,
+                pending: Vec::new(),
+            })
+        }
     }
 
-    /// Append wavelengths to the end of the dataset. Returns a list of unique `u16` IDs.
+    /// Append wavelengths to the end of the dataset. Returns unique `u16` IDs.
     ///
     /// ### Deduplication
     ///
-    /// Existing wavelengths are identified using [`find`]. New wavelengths are assigned the next
-    /// sequentially available ID.
+    /// Existing wavelengths are identified using [`find`](Self::find). New
+    /// wavelengths are assigned the next sequentially available ID.
     pub fn push(&mut self, nms: &[f32]) -> Result<Vec<u16>, Error> {
-        let disk: Vec<Record> = read(&self.path, &self.segments)?;
+        let disk: Vec<Record> = table::read_stream(&self.path, &self.segments)?;
         let ids: Vec<u16> = nms
             .iter()
-            .map(|&nm| match find(nm, &self.pending, &disk) {
+            .map(|&nm| match self.find(nm, &disk) {
                 Some(id) => id,
                 None => self.insert(nm),
             })
             .collect();
-        self.ipc.try_flush()?;
+        self.check()?;
         Ok(ids)
     }
 
     fn insert(&mut self, nm: f32) -> u16 {
         let id = self.next.fetch_add(1, Ordering::SeqCst);
         self.pending.push(Record::new(id, nm));
-        self.ipc.builder.push(id, nm);
+        let ipc = self.ipc.as_mut().expect("dataset open for writing");
+        ipc.builder.push(id, nm);
         id
     }
 
-    /// Flush builder, finish stream, and extract the serialised bytes.
-    pub fn take_bytes(&mut self) -> Result<Vec<u8>, Error> {
-        self.ipc.take_bytes()
-    }
-
-    /// Discard the current stream and start a fresh one.
-    pub fn reset(&mut self) -> Result<(), Error> {
-        self.ipc.reset(Self::new_stream()?);
-        Ok(())
-    }
-
-    /// Search for an existing [`Record`] within a constant wavelength tolerance.
+    /// Read all wavelength records from the dataset.
     ///
-    /// Returns [`Some`] if a matching record is found, else returns [`None`].
+    /// Automatically selects stream-based or memory-mapped reading based on
+    /// whether the dataset is writable.
     ///
-    /// # Example
+    /// # Errors
     ///
-    /// ```rust
-    /// match wavelengths.find(123.45) {
-    ///     Some(record) => println!("Matching record found: {:?}", record),
-    ///     None => println!("No matching record found."),
-    /// }
-    /// ```
-    fn find(&self, nm: f32) -> Option<&Record> {
-        const TOLERANCE: f32 = 1E-10; // 100 picometers
-        self.records.iter().find(|r| (r.nm - nm).abs() < TOLERANCE)
-    }
-}
-
-/* ---------------------------------------------------------------------------- Read Functions */
-
-/// Return the `id` of a wavelength matching `nm` within 100 picometre tolerance, or [`None`] if no
-/// matching wavelength is found.
-///
-/// Checks `pending` (in memory) before `written` (on disk).
-fn find(nm: f32, pending: &[Record], written: &[Record]) -> Option<u16> {
-    pending
-        .iter()
-        .chain(written) // Checks pending (in memory) before written (on disk)
-        .find(|r| (r.nm - nm).abs() < 1E-10) // 100 picometre tolerance
-        .map(|r| r.id)
-}
-
-/// Eagerly decode [`Record`]s from the given wavelength [`Segment`]s on disk.
-pub(super) fn read<P>(path: P, segments: &[Segment]) -> Result<Vec<Record>, Error>
-where
-    P: AsRef<Path>,
-{
-    let mut file = File::open(path)?;
-    let mut records = Vec::new();
-    let mut segments = segments.iter();
-    'outer: while let Some(segment) = segments.next() {
-        let mut stream = segment.stream(&mut file)?;
-        'inner: while let Some(batch) = stream.next().transpose()? {
-            for row in 0..batch.num_rows() {
-                let record = Record::read(&batch, row);
-                records.push(record);
-            }
+    /// Returns [`Error`] if the file cannot be read or the IPC data is invalid.
+    pub fn read(&self) -> Result<Vec<Record>, Error> {
+        match self.ipc.is_some() {
+            true => table::read_stream(&self.path, &self.segments),
+            false => table::read_mmap(&self.path, &self.segments),
         }
     }
-    Ok(records)
+
+    /// Return the `id` of a wavelength matching `nm` within 100 pm tolerance.
+    fn find(&self, nm: f32, written: &[Record]) -> Option<u16> {
+        self.pending
+            .iter()
+            .chain(written)
+            .find(|r| (r.nm - nm).abs() < 1E-10)
+            .map(|r| r.id)
+    }
 }
 
 /* ----------------------------------------------------------------------- Trait Implementations */
 
-impl Writer for Wavelengths {
+impl Sink for Wavelengths {
     const SCHEMA: LazyLock<Arc<Schema>> = LazyLock::new(|| {
         Arc::new(Schema::new(vec![
             Field::new("id", UInt16, false),
             Field::new("nm", Float32, false),
         ]))
     });
+
+    fn write(&mut self) -> Result<(), Error> {
+        self.ipc.as_mut().expect("dataset open for writing").flush()
+    }
+
+    fn check(&mut self) -> Result<(), Error> {
+        self.ipc.as_mut().expect("dataset open for writing").try_flush()
+    }
+
+    fn reset(&mut self, segments: Vec<Segment>) -> Result<(), Error> {
+        self.ipc
+            .as_mut()
+            .expect("dataset open for writing")
+            .reset(Self::new_stream()?);
+        self.segments = segments;
+        self.pending.clear();
+        Ok(())
+    }
+
+    fn take_bytes(&mut self) -> Result<Vec<u8>, Error> {
+        match self.ipc.as_mut() {
+            Some(ipc) => ipc.take_bytes(),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    fn finish(&self) -> Result<Vec<u8>, Error> {
+        table::consolidate(&self.path, &self.segments, &Self::SCHEMA)
+    }
 }
+

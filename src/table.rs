@@ -12,7 +12,7 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 use std::fmt::{Debug, Display};
 use std::fs::File;
-use std::io::{BufWriter, Cursor, Read, Seek};
+use std::io::{BufWriter, Cursor};
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
 
@@ -73,6 +73,7 @@ impl<B: Build> Ipc<B> {
     ///
     /// Returns [`ArrowError::IpcError`] if the [`StreamWriter`] is closed.
     pub fn flush(&mut self) -> Result<(), Error> {
+        // TODO Change return type to use `ArrowError`
         if self.builder.len() == 0 {
             return Ok(());
         }
@@ -81,6 +82,7 @@ impl<B: Build> Ipc<B> {
             .as_mut()
             .expect("Stream is None")
             .write(&batch)?;
+        // TODO Don't store `stream` as `Option` → Remove need for `expect`
         Ok(())
     }
 
@@ -128,6 +130,7 @@ pub(crate) trait Sink {
     const SCHEMA: LazyLock<Arc<Schema>>;
 
     /// Flush pending builder data to the in-memory IPC stream.
+    #[allow(dead_code, reason = "public API for explicit flush")]
     fn write(&mut self) -> Result<(), Error>;
 
     /// If pending data exceeds ~256 KB, call [`write`](Self::write).
@@ -155,6 +158,7 @@ pub(crate) trait Sink {
     /// ### Errors
     ///
     /// Returns [`ArrowError`] if the writer cannot be initialised.
+    // TODO Where is this fn used? Replace `Vec` with `Take` for zero-copy window into `File`.
     fn new_stream() -> Result<Stream, ArrowError> {
         StreamWriter::try_new_buffered(Vec::new(), &Self::SCHEMA)
     }
@@ -171,50 +175,6 @@ pub trait Record: Copy + Clone + Debug + Default + PartialEq + PartialOrd + Disp
     fn read(batch: &RecordBatch, row: usize) -> Self;
 }
 
-/* -------------------------------------------------------------------------------- Source Trait */
-
-/// Read records from Arrow IPC **stream** segments via zero-copy
-/// [`Take`](std::io::Take) windows.
-///
-/// Used by [`unfinished`](crate::dataset::unfinished) datasets where data is
-/// stored as one or more Arrow IPC stream segments.
-///
-/// See also [`Mmap`] for reading from finished (Arrow IPC file) datasets.
-pub(crate) trait Source {
-    /// Record type returned by [`read`](Self::read).
-    type Record: Record;
-
-    /// Read all records from the on-disk stream segments.
-    fn read(&self) -> Result<Vec<Self::Record>, Error>;
-}
-
-    /// Create a new [`FileWriter`] backed by a seekable [`Cursor`].
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ArrowError`] if the writer cannot be initialised.
-    fn new_file_writer() -> Result<FileWriter<BufWriter<Cursor<Vec<u8>>>>, ArrowError> {
-        FileWriter::try_new_buffered(Cursor::new(Vec::new()), &Self::SCHEMA)
-    }
-/* ---------------------------------------------------------------------------------- Mmap Trait */
-
-/// Read records from Arrow IPC **file** segments via memory-mapped I/O.
-///
-/// The dataset file is mapped read-only using [`memmap2::Mmap`]. This is safe
-/// because finished datasets are sealed and immutable.
-///
-/// Used by [`finished`](crate::dataset::finished) datasets for zero-copy,
-/// random-access reads.
-///
-/// See also [`Source`] for reading from unfinished (Arrow IPC stream) datasets.
-pub(crate) trait Mmap {
-    /// Record type returned by [`read`](Self::read).
-    type Record: Record;
-
-    /// Read all records from the memory-mapped file segments.
-    fn read(&self) -> Result<Vec<Self::Record>, Error>;
-}
-
 /* ------------------------------------------------------------------------- Shared Read Helpers */
 
 /// Read records from Arrow IPC **stream** segments using zero-copy
@@ -229,6 +189,10 @@ where
     P: AsRef<Path>,
     R: Record,
 {
+    // TODO Change `signature` in fn signature to an iterator with <Item = Segment>
+    if segments.is_empty() {
+        return Ok(Vec::new());
+    }
     let mut file = File::open(path)?;
     let mut records = Vec::new();
     'outer: for segment in segments {
@@ -269,21 +233,7 @@ pub(crate) fn read_mmap<R: Record>(path: &Path, segments: &[Segment]) -> Result<
     Ok(records)
 }
 
-/* ------------------------------------------------------------------ Segment I/O (from dataset) */
-
-/// Read the raw bytes of a single [`Segment`] from disk.
-pub(crate) fn read_segment(path: &Path, seg: &Segment) -> Result<Vec<u8>, Error> {
-    let mut file = File::open(path)?;
-    file.seek(seg.offset)?;
-    let mut buf = vec![0u8; seg.length as usize];
-    file.read_exact(&mut buf)?;
-    Ok(buf)
-}
-
-/// Read each segment's bytes from disk.
-pub(crate) fn read_all_segments(path: &Path, segments: &[Segment]) -> Result<Vec<Vec<u8>>, Error> {
-    segments.iter().map(|seg| read_segment(path, seg)).collect()
-}
+/* --------------------------------------------------------------- Segment Consolidation */
 
 /// Consolidate all segments into Arrow IPC **file** format bytes.
 ///

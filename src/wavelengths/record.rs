@@ -13,6 +13,8 @@ use std::fmt::{Display, Formatter};
 use arrow::array::{AsArray, RecordBatch};
 use arrow::datatypes::{Float32Type, UInt16Type};
 
+use crate::table;
+
 /* ------------------------------------------------------------------------------ Public Exports */
 
 /// A single wavelength entry.
@@ -30,30 +32,32 @@ impl Record {
     pub(super) const fn new(id: u16, nm: f32) -> Self {
         Self { id, nm }
     }
+}
 
-    /// Read a single [`Record`] from the [`RecordBatch`] at the specified `row` index.
+/* ----------------------------------------------------------------------- Trait Implementations */
+
+impl table::Record for Record {
+    /// Extract a single [`Record`] from `batch` at the specified `row` index.
     ///
     /// ### Panics
     ///
     /// - If the batch does not contain the required columns
     /// - If the row index is out of bounds
-    pub(super) fn read(batch: &RecordBatch, row: usize) -> Record {
+    fn read(batch: &RecordBatch, row: usize) -> Self {
         Self {
             id: batch
                 .column_by_name("id")
-                .expect("Wavelength Schema Violation: Batch does not contain 'id' column")
+                .expect("missing 'id' column")
                 .as_primitive::<UInt16Type>()
                 .value(row),
             nm: batch
                 .column_by_name("nm")
-                .expect("Wavelength Schema Violation: Batch does not contain 'nm' column")
+                .expect("missing 'nm' column")
                 .as_primitive::<Float32Type>()
                 .value(row),
         }
     }
 }
-
-/* ----------------------------------------------------------------------- Trait Implementations */
 
 impl Display for Record {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {

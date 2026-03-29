@@ -104,17 +104,22 @@ pub struct Segment {
     pub length: u64,
 }
 
-pub(super) type Stream<'a> = StreamReader<BufReader<Take<&'a mut File>>>;
+pub(crate) type Stream<'a> = StreamReader<BufReader<Take<&'a mut File>>>;
 
 impl Segment {
-    pub(super) fn stream<'a>(&self, file: &'a mut File) -> Result<Stream<'a>, Error> {
+    /// Create a zero-copy [`StreamReader`] window into `file` for this segment.
+    pub(crate) fn stream<'a>(&self, file: &'a mut File) -> Result<Stream<'a>, Error> {
         file.seek(self.offset)?;
         let view = file.take(self.length); // zero-copy window into the file
         Ok(StreamReader::try_new_buffered(view, None)?) // buffer reduces syscall overhead
     }
-}
 
-impl Segment {
+    /// `(start, len)` as `usize` for slicing memory-mapped buffers.
+    pub(crate) fn byte_range(&self) -> (usize, usize) {
+        let SeekFrom::Start(off) = self.offset else { panic!("Offset is not SeekFrom::Start") };
+        (off as usize, self.length as usize)
+    }
+
     /// Byte offset past the last byte of this segment.
     pub fn end(&self) -> u64 {
         let SeekFrom::Start(off) = self.offset else { panic!("Offset is not SeekFrom::Start") };

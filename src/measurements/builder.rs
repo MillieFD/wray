@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use arrow::array::{ArrayRef, Float32Builder, UInt32Builder, UInt64Builder};
 
-use crate::writer::Build;
+use crate::table::Build;
 
 /* ------------------------------------------------------------------------------ Public Exports */
 

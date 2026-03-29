@@ -15,35 +15,47 @@ pub(crate) mod record;
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
+use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
 
-use arrow::array::RecordBatch;
 use arrow::datatypes::DataType::{Float64, UInt16, UInt32};
-use arrow::datatypes::{Field, Float64Type, Schema, UInt16Type, UInt32Type};
+use arrow::datatypes::{Field, Schema};
 
 use self::builder::Builder;
 use self::record::Record;
 use crate::Error;
-use crate::util::col;
-use crate::writer::{Ipc, Writer};
+use crate::format::Segment;
+use crate::table::{self, Ipc, Sink};
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
-/// Writer for the intensities table.
+/// Abstraction over the intensities table.
 ///
 /// Each row maps a `(measurement, wavelength)` pair to an intensity value.
 /// Rows are auto-flushed to the in-memory IPC stream every 32 768 rows.
 pub struct Intensities {
-    /// Shared IPC stream + builder.
-    ipc: Ipc<Builder>,
+    /// IPC stream writer (`None` when read-only).
+    ipc: Option<Ipc<Builder>>,
+    /// Path to the dataset file.
+    path: PathBuf,
+    /// Location descriptors for written intensity segments.
+    segments: Vec<Segment>,
 }
 
 impl Intensities {
-    /// Create a new, empty intensities table.
-    pub fn new() -> Result<Self, Error> {
-        Ok(Self {
-            ipc: Ipc::new(Self::new_stream()?, Self::schema(), Builder::default()),
-        })
+    /// Create or open an intensities table for the dataset at `path`.
+    ///
+    /// When `writable` is `true`, an IPC stream writer is initialised.
+    pub(crate) fn new(
+        path: PathBuf,
+        segments: Vec<Segment>,
+        writable: bool,
+    ) -> Result<Self, Error> {
+        let ipc = match writable {
+            true => Some(Ipc::new(Self::new_stream()?, Self::schema(), Builder::default())),
+            false => None,
+        };
+        Ok(Self { ipc, path, segments })
     }
 
     /// Record intensity values for a single measurement.
@@ -56,45 +68,29 @@ impl Intensities {
         wavelengths: &[u16],
         intensities: &[f64],
     ) -> Result<(), Error> {
-        self.ipc.builder.push(measurement, wavelengths, intensities);
-        self.ipc.try_flush()
+        let ipc = self.ipc.as_mut().expect("dataset open for writing");
+        ipc.builder.push(measurement, wavelengths, intensities);
+        self.check()
     }
-
-    /// Flush builder, finish stream, and extract the serialised bytes.
-    pub fn take_bytes(&mut self) -> Result<Vec<u8>, Error> {
-        self.ipc.take_bytes()
+    /// Read all intensity records from the dataset.
+    ///
+    /// Automatically selects stream-based or memory-mapped reading based on
+    /// whether the dataset is writable.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] if the file cannot be read or the IPC data is invalid.
+    pub fn read(&self) -> Result<Vec<Record>, Error> {
+        match self.ipc.is_some() {
+            true => table::read_stream(&self.path, &self.segments),
+            false => table::read_mmap(&self.path, &self.segments),
+        }
     }
-
-    /// Discard the current stream and start a fresh one.
-    pub fn reset(&mut self) -> Result<(), Error> {
-        self.ipc.reset(Self::new_stream()?);
-        Ok(())
-    }
-}
-
-/* ---------------------------------------------------------------------------- Read Functions */
-
-/// Extract [`Record`]s from pre-decoded [`RecordBatch`]es.
-pub(crate) fn decode(batches: &[RecordBatch]) -> Result<Vec<Record>, Error> {
-    let mut out = Vec::new();
-    for batch in batches {
-        let ms = col::<UInt32Type>(batch, "measurement")?;
-        let wls = col::<UInt16Type>(batch, "wavelength")?;
-        let vals = col::<Float64Type>(batch, "intensity")?;
-        (0..batch.num_rows()).for_each(|i| {
-            out.push(Record {
-                measurement: ms.value(i),
-                wavelength: wls.value(i),
-                intensity: vals.value(i),
-            });
-        });
-    }
-    Ok(out)
 }
 
 /* ----------------------------------------------------------------------- Trait Implementations */
 
-impl Writer for Intensities {
+impl Sink for Intensities {
     const SCHEMA: LazyLock<Arc<Schema>> = LazyLock::new(|| {
         Arc::new(Schema::new(vec![
             Field::new("measurement", UInt32, false),
@@ -102,4 +98,33 @@ impl Writer for Intensities {
             Field::new("intensity", Float64, false),
         ]))
     });
+
+    fn write(&mut self) -> Result<(), Error> {
+        self.ipc.as_mut().expect("dataset open for writing").flush()
+    }
+
+    fn check(&mut self) -> Result<(), Error> {
+        self.ipc.as_mut().expect("dataset open for writing").try_flush()
+    }
+
+    fn reset(&mut self, segments: Vec<Segment>) -> Result<(), Error> {
+        self.ipc
+            .as_mut()
+            .expect("dataset open for writing")
+            .reset(Self::new_stream()?);
+        self.segments = segments;
+        Ok(())
+    }
+
+    fn take_bytes(&mut self) -> Result<Vec<u8>, Error> {
+        match self.ipc.as_mut() {
+            Some(ipc) => ipc.take_bytes(),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    fn finish(&self) -> Result<Vec<u8>, Error> {
+        table::consolidate(&self.path, &self.segments, &Self::SCHEMA)
+    }
 }
+

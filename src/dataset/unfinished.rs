@@ -21,6 +21,7 @@ use crate::measurements::Measurements;
 use crate::measurements::record::Record as MsRecord;
 use crate::table::{self, Sink};
 use crate::wavelengths::Wavelengths;
+
 /* ------------------------------------------------------------------------------ Public Exports */
 
 /// A writable `.wr` dataset backed by Arrow IPC stream segments.
@@ -35,7 +36,7 @@ use crate::wavelengths::Wavelengths;
 /// 5. Seal with [`finish`](Self::finish) for read-only access, or create a
 ///    snapshot with [`snapshot`](Self::snapshot).
 pub struct Dataset {
-    /// Experiment metadata (includes the file path).
+    /// Experiment metadata.
     manifest: Manifest,
     /// Wavelengths table.
     pub wavelengths: Wavelengths,
@@ -43,8 +44,6 @@ pub struct Dataset {
     pub measurements: Measurements,
     /// Intensities table.
     pub intensities: Intensities,
-    /// Whether the dataset has been written and closed.
-    closed: bool,
 }
 
 impl Dataset {

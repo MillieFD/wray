@@ -31,18 +31,18 @@ use crate::writer::{Ipc, Writer};
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
-/// Writer for the wavelengths table.
-///
-/// Maintains an in-memory cache of all wavelength records for deduplication.
-/// New wavelengths are accumulated in an Arrow builder and auto-flushed to
-/// the in-memory IPC stream when the builder is full.
+/// Abstraction over the wavelengths table.
 pub struct Wavelengths {
-    /// Shared IPC stream + builder.
+    /// Shared IPC stream and builder.
     ipc: Ipc<Builder>,
-    /// Next auto-increment wavelength ID.
+    /// Next available wavelength ID.
     next: AtomicU16,
-    /// In-memory dedup cache.
-    records: Vec<Record>,
+    /// Path to the dataset file.
+    path: PathBuf,
+    /// Location descriptors for written wavelength segments.
+    segments: Vec<Segment>,
+    /// Wavelengths added in the current write cycle.
+    pending: Vec<Record>,
 }
 
 impl Wavelengths {

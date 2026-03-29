@@ -65,13 +65,13 @@ impl Dataset {
         let path = path.as_ref();
         match path.exists() {
             true => {
-                let (header, manifest) = super::read_header(path)?;
+                let header = Header::new(path)?;
                 if header.finished {
                     return Err(Error::InvalidFormat(
                         "cannot append to finished dataset".into(),
                     ));
                 }
-                Self::from_manifest(path.to_path_buf(), manifest)
+                Self::from_manifest(path.to_path_buf(), header.manifest()?)
             }
             false => Self::create(path, cfg),
         }
@@ -240,6 +240,7 @@ impl Dataset {
         let manifest_bytes = manifest_str.as_bytes();
 
         let header = Header {
+            path: self.path.clone(),
             manifest_offset: offset,
             manifest_len: manifest_bytes.len() as u64,
             finished: false,
@@ -312,6 +313,7 @@ impl Dataset {
         let manifest_bytes = manifest_str.as_bytes();
 
         let header = Header {
+            path: path.to_path_buf(),
             manifest_offset: offset,
             manifest_len: manifest_bytes.len() as u64,
             finished: true,

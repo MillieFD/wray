@@ -15,7 +15,6 @@ pub mod unfinished;
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
-use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 use crate::Error;
@@ -47,7 +46,8 @@ impl Dataset {
     /// or the manifest TOML is malformed.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
         let path = path.as_ref();
-        let (header, manifest) = read_header(path)?;
+        let header = Header::new(path)?;
+        let manifest = header.manifest()?;
         match header.finished {
             true => finished::Dataset::new(path.to_path_buf(), manifest).map(Self::Finished),
             false => {
@@ -74,15 +74,4 @@ impl Dataset {
     }
 }
 
-/* ---------------------------------------------------------------------------- Helper Functions */
 
-/// Read the [`Header`] and [`Manifest`] from a `.wr` file.
-pub(crate) fn read_header(path: &Path) -> Result<(Header, Manifest), Error> {
-    let mut file = std::fs::File::open(path)?;
-    let header = Header::read(&mut file)?;
-    file.seek(SeekFrom::Start(header.manifest_offset))?;
-    let mut buf = vec![0u8; header.manifest_len as usize];
-    file.read_exact(&mut buf)?;
-    let manifest: Manifest = toml::from_str(std::str::from_utf8(&buf)?)?;
-    Ok((header, manifest))
-}

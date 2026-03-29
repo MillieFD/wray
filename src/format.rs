@@ -12,6 +12,7 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom, Take, Write};
+use std::path::{Path, PathBuf};
 
 use arrow::ipc::reader::StreamReader;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -184,6 +185,8 @@ impl Manifest {
 ///
 /// Layout: `MAGIC(4) + VERSION(2) + FINISHED(1) + manifest_offset(8) + manifest_len(8)`.
 pub(crate) struct Header {
+    /// Path of the `.wr` file this header was read from.
+    pub path: PathBuf,
     /// Byte offset of the TOML manifest from the start of the file.
     pub manifest_offset: u64,
     /// Length of the TOML manifest in bytes.
@@ -193,6 +196,28 @@ pub(crate) struct Header {
 }
 
 impl Header {
+    /// Open `path` and read and validate the file header.
+    pub fn new<P>(path: P) -> Result<Self, Error>
+    where
+        P: AsRef<Path>,
+    {
+        let path = path.as_ref();
+        let mut file = File::open(path)?;
+        let mut header = Self::read(&mut file)?;
+        header.path = path.to_path_buf();
+        Ok(header)
+    }
+
+    /// Read and parse the manifest TOML from this header's file.
+    pub fn manifest(&self) -> Result<Manifest, Error> {
+        let mut file = File::open(&self.path)?;
+        file.seek(SeekFrom::Start(self.manifest_offset))?;
+        let mut buf = vec![0u8; self.manifest_len as usize];
+        file.read_exact(&mut buf)?;
+        let manifest: Manifest = toml::from_str(std::str::from_utf8(&buf)?)?;
+        Ok(manifest)
+    }
+
     /// Write the header to `w`.
     pub fn write<W: Write>(&self, w: &mut W) -> Result<(), Error> {
         w.write_all(MAGIC)?;
@@ -204,7 +229,7 @@ impl Header {
     }
 
     /// Read and validate the header from `r`.
-    pub fn read<R: Read>(r: &mut R) -> Result<Self, Error> {
+    fn read<R: Read>(r: &mut R) -> Result<Self, Error> {
         let mut buf = [0u8; HEADER];
         r.read_exact(&mut buf)?;
         if &buf[0..4] != MAGIC {
@@ -215,6 +240,7 @@ impl Header {
             return Err(Error::InvalidFormat(format!("unsupported version: {version}")));
         }
         Ok(Self {
+            path: PathBuf::new(),
             finished: buf[6] != 0,
             manifest_offset: u64::from_le_bytes(buf[7..15].try_into().expect("8 bytes")),
             manifest_len: u64::from_le_bytes(buf[15..23].try_into().expect("8 bytes")),

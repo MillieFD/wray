@@ -67,7 +67,7 @@ impl Dataset {
                         "cannot append to finished dataset",
                     ));
                 }
-                Self::new(manifest)
+                Self::try_from(manifest)
             }
             false => Self::create(path, cfg),
         }
@@ -92,7 +92,7 @@ impl Dataset {
     /// Returns [`Error`] if the file cannot be written.
     pub fn close(mut self) -> Result<(), Error> {
         self.write_to_disk()?;
-        self.closed = true;
+        std::mem::forget(self);
         Ok(())
     }
 
@@ -108,7 +108,7 @@ impl Dataset {
         self.write_segmented()?;
         let path = self.manifest.path.clone();
         let manifest = self.write_finished(&path)?;
-        self.closed = true;
+        std::mem::forget(self);
         super::finished::Dataset::new(manifest)
     }
 
@@ -139,7 +139,7 @@ impl Dataset {
             .as_micros()
             .try_into()
             .expect("microsecond timestamp exceeds u64");
-        let manifest = Manifest::new(path.to_path_buf(), timestamp, cfg);
+        let manifest = Manifest::new(path, timestamp, cfg);
         let wavelengths = Wavelengths::new(path, Vec::new(), true)?;
         let measurements = Measurements::new(path, Vec::new(), true, timestamp, 0)?;
         let intensities = Intensities::new(path, Vec::new(), true)?;
@@ -148,16 +148,12 @@ impl Dataset {
             measurements,
             intensities,
             manifest,
-            closed: false,
         })
     }
 
-    /// Flush pending data and write to disk if not already closed.
+    /// Flush pending data and write to disk.
     fn write_to_disk(&mut self) -> Result<(), Error> {
-        match self.closed {
-            true => Ok(()),
-            false => self.write_segmented(),
-        }
+        self.write_segmented()
     }
 
     /// Extract pending bytes, append as new segments, rewrite file.
@@ -330,15 +326,12 @@ impl TryFrom<Manifest> for Dataset {
             measurements,
             intensities,
             manifest,
-            closed: false,
         })
     }
 }
 
 impl Drop for Dataset {
     fn drop(&mut self) {
-        if !self.closed {
-            let _ = self.write_to_disk();
-        }
+        let _ = self.write_to_disk();
     }
 }

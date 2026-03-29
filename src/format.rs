@@ -13,7 +13,7 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom, Take, Write};
 use std::mem::size_of;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use arrow::ipc::reader::StreamReader;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -197,7 +197,8 @@ pub struct Manifest {
 
 impl Manifest {
     /// Create a new [`Manifest`] for the given file `path`, creation timestamp, and [`Config`].
-    pub(crate) fn new(path: PathBuf, timestamp: u64, cfg: &Config) -> Self {
+    pub(crate) fn new(path: impl AsRef<Path>, timestamp: u64, cfg: &Config) -> Self {
+        let path = path.as_ref().to_path_buf();
         Self {
             timestamp,
             calibrations: Vec::with_capacity(8),

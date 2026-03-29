@@ -15,7 +15,7 @@ pub mod unfinished;
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek};
 use std::path::Path;
 
 use crate::Error;
@@ -50,11 +50,10 @@ impl Dataset {
         let (header, manifest) = read_header(path)?;
         match header.format {
             Format::Finished => {
-                finished::Dataset::new(path.to_path_buf(), manifest).map(Self::Finished)
+                finished::Dataset::new(path, manifest).map(Self::Finished)
             }
             Format::Unfinished => {
-                unfinished::Dataset::from_manifest(path.to_path_buf(), manifest)
-                    .map(Self::Unfinished)
+                unfinished::Dataset::from_manifest(path, manifest).map(Self::Unfinished)
             }
         }
     }
@@ -82,8 +81,8 @@ impl Dataset {
 pub(crate) fn read_header(path: &Path) -> Result<(Header, Manifest), Error> {
     let mut file = std::fs::File::open(path)?;
     let header = Header::read(&mut file)?;
-    file.seek(SeekFrom::Start(header.manifest_offset))?;
-    let mut buf = vec![0u8; header.manifest_len as usize];
+    file.seek(header.manifest.offset)?;
+    let mut buf = vec![0u8; header.manifest.length as usize];
     file.read_exact(&mut buf)?;
     let manifest: Manifest = toml::from_str(std::str::from_utf8(&buf)?)?;
     Ok((header, manifest))

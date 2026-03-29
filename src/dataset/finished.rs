@@ -10,7 +10,7 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
-use std::path::PathBuf;
+use std::path::Path;
 
 use crate::Error;
 use crate::format::Manifest;
@@ -38,7 +38,8 @@ pub struct Dataset {
 
 impl Dataset {
     /// Construct a finished dataset from a path and pre-read [`Manifest`].
-    pub(crate) fn new(path: PathBuf, manifest: Manifest) -> Result<Self, Error> {
+    pub(crate) fn new(path: impl AsRef<Path>, manifest: Manifest) -> Result<Self, Error> {
+        let path = path.as_ref().to_path_buf();
         Ok(Self {
             wavelengths: Wavelengths::new(path.clone(), manifest.wavelengths.clone(), false)?,
             measurements: Measurements::new(

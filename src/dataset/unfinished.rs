@@ -68,7 +68,7 @@ impl Dataset {
                 let (header, manifest) = super::read_header(path)?;
                 if header.format != Format::Unfinished {
                     return Err(Error::InvalidFormat(
-                        "cannot append to finished dataset".into(),
+                        "cannot append to finished dataset",
                     ));
                 }
                 Self::from_manifest(path.to_path_buf(), manifest)
@@ -138,7 +138,8 @@ impl Dataset {
 
     /// Construct from a pre-read [`Manifest`] (used by [`new`](Self::new) and
     /// [`Dataset::open`](super::Dataset::open)).
-    pub(crate) fn from_manifest(path: PathBuf, manifest: Manifest) -> Result<Self, Error> {
+    pub(crate) fn from_manifest(path: impl AsRef<Path>, manifest: Manifest) -> Result<Self, Error> {
+        let path = path.as_ref().to_path_buf();
         let records: Vec<MsRecord> = table::read_stream(&path, &manifest.measurements)?;
         let next_id = records.iter().map(|r| r.id).max().map_or(0, |id| id + 1);
         Ok(Self {
@@ -240,8 +241,10 @@ impl Dataset {
         let manifest_bytes = manifest_str.as_bytes();
 
         let header = Header {
-            manifest_offset: offset,
-            manifest_len: manifest_bytes.len() as u64,
+            manifest: Segment {
+                offset: SeekFrom::Start(offset),
+                length: manifest_bytes.len() as u64,
+            },
             format: Format::Unfinished,
         };
 
@@ -312,8 +315,10 @@ impl Dataset {
         let manifest_bytes = manifest_str.as_bytes();
 
         let header = Header {
-            manifest_offset: offset,
-            manifest_len: manifest_bytes.len() as u64,
+            manifest: Segment {
+                offset: SeekFrom::Start(offset),
+                length: manifest_bytes.len() as u64,
+            },
             format: Format::Finished,
         };
 

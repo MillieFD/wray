@@ -12,6 +12,7 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom, Take, Write};
+use std::mem::size_of;
 
 use arrow::ipc::reader::StreamReader;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -28,8 +29,13 @@ pub(super) const VERSION: u8 = 1;
 
 /// Length (in bytes) of the fixed-size file header.
 ///
-/// Layout: `MAGIC(4) + manifest_offset(8) + manifest_len(8) + VERSION(1) + file_type(1) = 22`.
-pub(super) const HEADER: usize = 22;
+/// Derived at compile time from the sizes of its constituent fields:
+/// `MAGIC(4) + manifest_offset(8) + manifest_len(8) + VERSION(1) + file_type(1)`.
+pub(super) const HEADER: usize = size_of::<[u8; 4]>()  // MAGIC
+    + size_of::<u64>()  // manifest_offset
+    + size_of::<u64>()  // manifest_len
+    + size_of::<u8>()   // VERSION
+    + size_of::<u8>();  // file_type
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
@@ -88,7 +94,7 @@ pub struct Config {
 ///
 /// Encoded as a single byte (`u8`) in the file header.
 /// `0` = [`Unfinished`](Format::Unfinished), `1` = [`Finished`](Format::Finished).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Format {
     /// Arrow IPC stream format — supports reading and appending.
     Unfinished,
@@ -112,9 +118,7 @@ impl TryFrom<u8> for Format {
         match value {
             0 => Ok(Self::Unfinished),
             1 => Ok(Self::Finished),
-            _ => Err(crate::Error::InvalidFormat(format!(
-                "unknown file type: {value}"
-            ))),
+            _ => Err(crate::Error::InvalidFormat("unknown file type")),
         }
     }
 }
@@ -206,24 +210,25 @@ impl Manifest {
 
 /* -------------------------------------------------------------------------------------- Header */
 
-/// The 22-byte header at the start of every `.wr` file.
+/// The fixed-size header at the start of every `.wr` file.
 ///
 /// Layout: `MAGIC(4) + manifest_offset(8) + manifest_len(8) + VERSION(1) + file_type(1)`.
 pub(crate) struct Header {
-    /// Byte offset of the TOML manifest from the start of the file.
-    pub manifest_offset: u64,
-    /// Length of the TOML manifest in bytes.
-    pub manifest_len: u64,
-    /// File type (stream or sealed file format).
+    /// Location of the TOML manifest within the file.
+    pub manifest: Segment,
+    /// File type. See [`Format`].
     pub format: Format,
 }
 
 impl Header {
     /// Write the header to `w`.
     pub fn write<W: Write>(&self, w: &mut W) -> Result<(), Error> {
+        let SeekFrom::Start(offset) = self.manifest.offset else {
+            return Err(Error::InvalidFormat("manifest position must be absolute from file start"));
+        };
         w.write_all(MAGIC)?;
-        w.write_all(&self.manifest_offset.to_le_bytes())?;
-        w.write_all(&self.manifest_len.to_le_bytes())?;
+        w.write_all(&offset.to_le_bytes())?;
+        w.write_all(&self.manifest.length.to_le_bytes())?;
         w.write_all(&[VERSION])?;
         w.write_all(&[u8::from(self.format)])?;
         Ok(())
@@ -234,18 +239,20 @@ impl Header {
         let mut buf = [0u8; HEADER];
         r.read_exact(&mut buf)?;
         if &buf[0..4] != MAGIC {
-            return Err(Error::InvalidFormat("invalid magic bytes".into()));
+            return Err(Error::InvalidFormat("invalid magic bytes"));
         }
         let manifest_offset = u64::from_le_bytes(buf[4..12].try_into().expect("8 bytes"));
         let manifest_len = u64::from_le_bytes(buf[12..20].try_into().expect("8 bytes"));
         let version = buf[20];
         if version != VERSION {
-            return Err(Error::InvalidFormat(format!("unsupported version: {version}")));
+            return Err(Error::InvalidFormat("unsupported version"));
         }
         let format = Format::try_from(buf[21])?;
         Ok(Self {
-            manifest_offset,
-            manifest_len,
+            manifest: Segment {
+                offset: SeekFrom::Start(manifest_offset),
+                length: manifest_len,
+            },
             format,
         })
     }

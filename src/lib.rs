@@ -29,8 +29,7 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 //! [Header 22 B] [Segment …] [Segment …] … [Manifest TOML]
 //! ```
 //!
-//! The 22-byte header stores magic bytes `WRAY`, manifest offset and length,
-//! format version, and file type. Each segment holds Arrow IPC stream data.
+//! See [`format::Header`] for the binary layout. Each segment holds Arrow IPC stream data.
 //! The manifest TOML at the end indexes all segments and stores experiment metadata.
 //!
 //! [1]: unfinished::Dataset::new

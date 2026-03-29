@@ -201,7 +201,7 @@ impl Header {
     where
         P: AsRef<Path>,
     {
-        let mut file = File::open(path.as_ref())?;
+        let mut file = File::open(path)?;
         let mut header = Self::read(&mut file)?;
         header.path = path.as_ref().to_path_buf();
         Ok(header)

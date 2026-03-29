@@ -67,7 +67,7 @@ impl Dataset {
                         "cannot append to finished dataset",
                     ));
                 }
-                Self::try_from(manifest)
+                Self::new(manifest)
             }
             false => Self::create(path, cfg),
         }
@@ -109,7 +109,7 @@ impl Dataset {
         let path = self.manifest.path.clone();
         let manifest = self.write_finished(&path)?;
         self.closed = true;
-        super::finished::Dataset::try_from(manifest)
+        super::finished::Dataset::new(manifest)
     }
 
     /// Consolidate to a **new** file at `path`, leaving the original appendable.
@@ -126,7 +126,7 @@ impl Dataset {
     ) -> Result<super::finished::Dataset, Error> {
         self.write_to_disk()?;
         let manifest = self.write_finished(path.as_ref())?;
-        super::finished::Dataset::try_from(manifest)
+        super::finished::Dataset::new(manifest)
     }
 
     /* ---------------------------------------------------------------------------- Private */

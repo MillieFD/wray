@@ -177,22 +177,13 @@ pub trait Record: Copy + Clone + Debug + Default + PartialEq + PartialOrd + Disp
 
 /* ------------------------------------------------------------------------- Shared Read Helpers */
 
-/// Read records from Arrow IPC **stream** segments using zero-copy
-/// [`Take`](std::io::Take) windows.
-///
-/// Opens the file at `path`, iterates `segments`, and for each one creates a
-/// [`StreamReader`](arrow::ipc::reader::StreamReader) via
-/// [`Segment::stream`](Segment::stream). Records are extracted
-/// row-by-row via [`Record::read`].
-pub(crate) fn read_stream<P, R>(path: P, segments: &[Segment]) -> Result<Vec<R>, Error>
+/// Read records from Arrow IPC **stream** segments using zero-copy [`Take`][1] windows.
+pub(crate) fn read_stream<'a, I, P, R>(path: P, segments: I) -> Result<Vec<R>, Error>
 where
+    I: IntoIterator<Item = &'a Segment>,
     P: AsRef<Path>,
     R: Record,
 {
-    // TODO Change `signature` in fn signature to an iterator with <Item = Segment>
-    if segments.is_empty() {
-        return Ok(Vec::new());
-    }
     let mut file = File::open(path)?;
     let mut records = Vec::new();
     'outer: for segment in segments {

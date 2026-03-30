@@ -74,12 +74,6 @@ impl Dataset {
         self.manifest.calibrations.push(id);
     }
 
-    /// Borrow the experiment metadata.
-    pub const fn manifest(&self) -> &Manifest {
-        // TODO Remove accessor fn in favour of direct access to dataset.manifest
-        &self.manifest
-    }
-
     /* ----------------------------------------------------------------------------- Write */
 
     /// Flush pending data and write the `.wr` file to disk.
@@ -230,7 +224,8 @@ impl Dataset {
         std::io::Write::write_all(&mut file, manifest_bytes)?;
 
         self.wavelengths.reset(self.manifest.wavelengths.clone())?;
-        self.measurements.reset(self.manifest.measurements.clone())?;
+        self.measurements
+            .reset(self.manifest.measurements.clone())?;
         self.intensities.reset(self.manifest.intensities.clone())?;
 
         Ok(())

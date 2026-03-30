@@ -44,12 +44,6 @@ impl Dataset {
             manifest,
         })
     }
-
-    /// Borrow the experiment metadata.
-    pub const fn manifest(&self) -> &Manifest {
-        // TODO Remove accessor fn in favour of direct access to dataset.manifest
-        &self.manifest
-    }
 }
 
 /* ----------------------------------------------------------------------- Trait Implementations */

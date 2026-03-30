@@ -15,7 +15,7 @@ pub(crate) mod record;
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, LazyLock};
 
@@ -24,9 +24,9 @@ use arrow::datatypes::{Field, Schema};
 
 use self::builder::Builder;
 use self::record::Record;
-use crate::Error;
 use crate::format::Segment;
 use crate::table::{self, Ipc, Sink};
+use crate::{Error, Manifest};
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
@@ -51,34 +51,23 @@ pub struct Wavelengths {
 
 impl Wavelengths {
     /// Create or open a wavelengths table for the dataset at `path`.
-    ///
-    /// When `writable` is `true`, an IPC stream writer is initialised and the
-    /// next available ID is restored from existing on-disk records.
-    pub(crate) fn new(
-        path: impl AsRef<Path>,
-        segments: Vec<Segment>,
-        writable: bool,
-    ) -> Result<Self, Error> {
-        let path = path.as_ref().to_path_buf();
-        if writable {
-            let existing: Vec<Record> = table::read_stream(&path, &segments)?;
-            let next = existing.iter().map(|r| r.id).max().map_or(0, |id| id + 1);
-            Ok(Self {
-                ipc: Some(Ipc::new(Self::new_stream()?, Self::schema(), Builder::new())),
-                next: AtomicU16::new(next),
-                path,
-                segments,
-                pending: Vec::new(),
-            })
-        } else {
-            Ok(Self {
-                ipc: None,
-                next: AtomicU16::new(0),
-                path,
-                segments,
-                pending: Vec::new(),
-            })
-        }
+    pub(crate) fn new(manifest: &Manifest) -> Result<Self, Error> {
+        Ok(Self {
+            ipc: Some(Ipc::new(
+                Self::new_stream()?,
+                Self::schema(),
+                Builder::new(),
+            )),
+            next: table::read_stream(&manifest.path, &manifest.wavelengths)?
+                .iter()
+                .map(|r: &Record| r.id)
+                .max()
+                .map_or(0, |id| id + 1)
+                .into(),
+            path: manifest.path.clone(),
+            segments: manifest.wavelengths.clone(),
+            pending: Vec::new(),
+        })
     }
 
     /// Append wavelengths to the end of the dataset. Returns unique `u16` IDs.
@@ -148,7 +137,10 @@ impl Sink for Wavelengths {
     }
 
     fn check(&mut self) -> Result<(), Error> {
-        self.ipc.as_mut().expect("dataset open for writing").try_flush()
+        self.ipc
+            .as_mut()
+            .expect("dataset open for writing")
+            .try_flush()
     }
 
     fn reset(&mut self, segments: Vec<Segment>) -> Result<(), Error> {
@@ -172,4 +164,3 @@ impl Sink for Wavelengths {
         table::consolidate(&self.path, &self.segments, &Self::SCHEMA)
     }
 }
-

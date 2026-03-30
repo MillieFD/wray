@@ -128,13 +128,10 @@ impl Dataset {
             .try_into()
             .expect("microsecond timestamp exceeds u64");
         let manifest = Manifest::new(path, timestamp, cfg);
-        let wavelengths = Wavelengths::new(&manifest)?;
-        let measurements = Measurements::new(&manifest)?;
-        let intensities = Intensities::new(&manifest)?;
         Ok(Self {
-            wavelengths,
-            measurements,
-            intensities,
+            wavelengths: Wavelengths::new(&manifest)?,
+            measurements: Measurements::new(&manifest)?,
+            intensities: Intensities::new(&manifest)?,
             manifest,
         })
     }

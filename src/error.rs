@@ -28,7 +28,7 @@ pub enum Error {
     /// A required Arrow column was not found.
     MissingColumn(String),
     /// The `.wray` binary layout is invalid or unsupported.
-    InvalidFormat(String),
+    InvalidFormat(&'static str),
 }
 
 /* ----------------------------------------------------------------------- Trait Implementations */
@@ -72,7 +72,7 @@ impl From<toml::de::Error> for Error {
 }
 
 impl From<std::str::Utf8Error> for Error {
-    fn from(e: std::str::Utf8Error) -> Self {
-        Self::InvalidFormat(e.to_string())
+    fn from(_: std::str::Utf8Error) -> Self {
+        Self::InvalidFormat("manifest is not valid UTF-8")
     }
 }

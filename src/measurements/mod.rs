@@ -15,7 +15,7 @@ pub(crate) mod record;
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::SystemTime;
@@ -54,12 +54,13 @@ impl Measurements {
     ///
     /// When `writable` is `true`, an IPC stream writer is initialised.
     pub(crate) fn new(
-        path: PathBuf,
+        path: impl AsRef<Path>,
         segments: Vec<Segment>,
         writable: bool,
         epoch: u64,
         next_id: u32,
     ) -> Result<Self, Error> {
+        let path = path.as_ref().to_path_buf();
         let ipc = match writable {
             true => Some(Ipc::new(Self::new_stream()?, Self::schema(), Builder::default())),
             false => None,

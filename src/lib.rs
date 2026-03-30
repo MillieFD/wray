@@ -26,12 +26,11 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 //! # File format
 //!
 //! ```text
-//! [Header 23 B] [Segment …] [Segment …] … [Manifest TOML]
+//! [Header 22 B] [Segment …] [Segment …] … [Manifest TOML]
 //! ```
 //!
-//! The 23-byte header stores magic bytes `WRAY`, format version, finished flag, and the manifest
-//! offset. Each segment holds Arrow IPC stream data. The manifest TOML at the end indexes all
-//! segments and stores experiment metadata.
+//! See [`format::Header`] for the binary layout. Each segment holds Arrow IPC stream data.
+//! The manifest TOML at the end indexes all segments and stores experiment metadata.
 //!
 //! [1]: unfinished::Dataset::new
 //! [2]: unfinished::Dataset::close
@@ -476,5 +475,56 @@ mod tests {
         }
         let ds = expect_unfinished(&path);
         assert_eq!(ds.wavelengths.read().expect("wl").len(), 2);
+    }
+
+    /* --------------------------------------------------------------------- Header bytes */
+
+    #[test]
+    fn header_bytes_unfinished() {
+        use std::io::Read;
+        let path = tmp();
+        {
+            let ds = unfinished::Dataset::new(&path, &XY).expect("create");
+            ds.close().expect("close");
+        }
+        let mut file = std::fs::File::open(&path).expect("open");
+        let mut buf = [0u8; 22];
+        file.read_exact(&mut buf).expect("read header");
+
+        // Magic bytes
+        assert_eq!(&buf[0..4], b"WRAY");
+
+        // manifest_offset: u64 LE at bytes 4–11
+        let manifest_offset = u64::from_le_bytes(buf[4..12].try_into().unwrap());
+        // manifest_len: u64 LE at bytes 12–19
+        let manifest_len = u64::from_le_bytes(buf[12..20].try_into().unwrap());
+        // Both must be non-zero and consistent with file size
+        let file_len = std::fs::metadata(&path).expect("metadata").len();
+        assert!(manifest_offset + manifest_len <= file_len);
+
+        // Format version: u8 at byte 20
+        assert_eq!(buf[20], 1, "format version must be 1");
+        // File type: u8 at byte 21 — 0 = Unfinished
+        assert_eq!(buf[21], 0, "file type must be 0 (Unfinished)");
+    }
+
+    #[test]
+    fn header_bytes_finished() {
+        use std::io::Read;
+        let path = tmp();
+        {
+            let ds = unfinished::Dataset::new(&path, &XY).expect("create");
+            ds.finish().expect("finish");
+        }
+        let mut file = std::fs::File::open(&path).expect("open");
+        let mut buf = [0u8; 22];
+        file.read_exact(&mut buf).expect("read header");
+
+        // Magic bytes
+        assert_eq!(&buf[0..4], b"WRAY");
+        // Format version: u8 at byte 20
+        assert_eq!(buf[20], 1, "format version must be 1");
+        // File type: u8 at byte 21 — 1 = Finished
+        assert_eq!(buf[21], 1, "file type must be 1 (Finished)");
     }
 }

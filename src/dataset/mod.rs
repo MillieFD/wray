@@ -15,11 +15,11 @@ pub mod unfinished;
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek};
 use std::path::Path;
 
 use crate::Error;
-use crate::format::{Header, Manifest};
+use crate::format::{Format, Header, Manifest};
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
@@ -48,11 +48,12 @@ impl Dataset {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
         let path = path.as_ref();
         let (header, manifest) = read_header(path)?;
-        match header.finished {
-            true => finished::Dataset::new(path.to_path_buf(), manifest).map(Self::Finished),
-            false => {
-                unfinished::Dataset::from_manifest(path.to_path_buf(), manifest)
-                    .map(Self::Unfinished)
+        match header.format {
+            Format::Finished => {
+                finished::Dataset::try_from(manifest).map(Self::Finished)
+            }
+            Format::Unfinished => {
+                unfinished::Dataset::try_from(manifest).map(Self::Unfinished)
             }
         }
     }
@@ -80,9 +81,10 @@ impl Dataset {
 pub(crate) fn read_header(path: &Path) -> Result<(Header, Manifest), Error> {
     let mut file = std::fs::File::open(path)?;
     let header = Header::read(&mut file)?;
-    file.seek(SeekFrom::Start(header.manifest_offset))?;
-    let mut buf = vec![0u8; header.manifest_len as usize];
+    file.seek(header.manifest.offset)?;
+    let mut buf = vec![0u8; header.manifest.length as usize];
     file.read_exact(&mut buf)?;
-    let manifest: Manifest = toml::from_str(std::str::from_utf8(&buf)?)?;
+    let mut manifest: Manifest = toml::from_str(std::str::from_utf8(&buf)?)?;
+    manifest.path = path.to_path_buf();
     Ok((header, manifest))
 }

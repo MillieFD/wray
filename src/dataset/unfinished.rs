@@ -18,8 +18,7 @@ use crate::Error;
 use crate::format::{Config, Format, HEADER, Header, Manifest, Segment};
 use crate::intensities::Intensities;
 use crate::measurements::Measurements;
-use crate::measurements::record::Record as MsRecord;
-use crate::table::{self, Sink};
+use crate::table::Sink;
 use crate::wavelengths::Wavelengths;
 
 /* ------------------------------------------------------------------------------ Public Exports */
@@ -29,12 +28,11 @@ use crate::wavelengths::Wavelengths;
 /// # Lifecycle
 ///
 /// 1. **Create** a new file with [`new`](Self::new).
-/// 2. **Push** wavelengths, measurements, and intensities via the public table
-///    fields.
+/// 2. **Push** wavelengths, measurements, and intensities via the public table fields.
 /// 3. [`close`](Self::close) the file once all data has been written.
 /// 4. Reopen with [`new`](Self::new) to append additional data.
-/// 5. Seal with [`finish`](Self::finish) for read-only access, or create a
-///    snapshot with [`snapshot`](Self::snapshot).
+/// 5. Seal with [`finish`](Self::finish) for read-only access, or create a snapshot with
+///    [`snapshot`](Self::snapshot).
 pub struct Dataset {
     /// Experiment metadata.
     manifest: Manifest,
@@ -63,11 +61,9 @@ impl Dataset {
             true => {
                 let header = Header::new(path)?;
                 if header.format != Format::Unfinished {
-                    return Err(Error::InvalidFormat(
-                        "cannot append to finished dataset",
-                    ));
+                    return Err(Error::InvalidFormat("cannot append to finished dataset"));
                 }
-                Self::try_from(header.manifest()?)
+                header.manifest()?.try_into()
             }
             false => Self::create(path, cfg),
         }
@@ -120,10 +116,7 @@ impl Dataset {
     /// # Errors
     ///
     /// Returns [`Error`] if either file cannot be written or consolidated.
-    pub fn snapshot(
-        &mut self,
-        path: impl AsRef<Path>,
-    ) -> Result<super::finished::Dataset, Error> {
+    pub fn snapshot(&mut self, path: impl AsRef<Path>) -> Result<super::finished::Dataset, Error> {
         self.write_to_disk()?;
         let manifest = self.write_finished(path.as_ref())?;
         super::finished::Dataset::new(manifest)
@@ -140,9 +133,9 @@ impl Dataset {
             .try_into()
             .expect("microsecond timestamp exceeds u64");
         let manifest = Manifest::new(path, timestamp, cfg);
-        let wavelengths = Wavelengths::new(path, Vec::new(), true)?;
-        let measurements = Measurements::new(path, Vec::new(), true, timestamp, 0)?;
-        let intensities = Intensities::new(path, Vec::new(), true)?;
+        let wavelengths = Wavelengths::new(&manifest)?;
+        let measurements = Measurements::new(&manifest)?;
+        let intensities = Intensities::new(&manifest)?;
         Ok(Self {
             wavelengths,
             measurements,
@@ -307,26 +300,11 @@ impl Dataset {
 impl TryFrom<Manifest> for Dataset {
     type Error = Error;
 
-    /// Construct from a pre-read [`Manifest`].
-    ///
-    /// The manifest's [`path`](Manifest::path) field must be set before calling;
-    /// [`read_header`](super::read_header) sets it automatically.
     fn try_from(manifest: Manifest) -> Result<Self, Self::Error> {
-        let records: Vec<MsRecord> = table::read_stream(&manifest.path, &manifest.measurements)?;
-        let next_id = records.iter().map(|r| r.id).max().map_or(0, |id| id + 1);
-        let wavelengths = Wavelengths::new(&manifest.path, manifest.wavelengths.clone(), true)?;
-        let measurements = Measurements::new(
-            &manifest.path,
-            manifest.measurements.clone(),
-            true,
-            manifest.timestamp,
-            next_id,
-        )?;
-        let intensities = Intensities::new(&manifest.path, manifest.intensities.clone(), true)?;
         Ok(Self {
-            wavelengths,
-            measurements,
-            intensities,
+            wavelengths: Wavelengths::new(&manifest)?,
+            measurements: Measurements::new(&manifest)?,
+            intensities: Intensities::new(&manifest)?,
             manifest,
         })
     }

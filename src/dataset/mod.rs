@@ -24,9 +24,7 @@ use crate::format::{Format, Header, Manifest};
 
 /// A `.wr` dataset for storing optical spectroscopy data.
 ///
-/// Provides type-safe separation between writable
-/// ([`Unfinished`](unfinished::Dataset)) and sealed read-only
-/// ([`Finished`](finished::Dataset)) states.
+/// Provides type-safe separation between [`Unfinished`] and [`Finished`] file states.
 pub enum Dataset {
     /// Writable dataset backed by Arrow IPC stream segments.
     Unfinished(unfinished::Dataset),

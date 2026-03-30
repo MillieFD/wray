@@ -18,7 +18,7 @@ pub mod unfinished;
 use std::path::Path;
 
 use crate::Error;
-use crate::format::{Header, Manifest};
+use crate::format::{Format, Header, Manifest};
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
@@ -45,14 +45,14 @@ impl Dataset {
     /// Returns [`Error`] if the file cannot be read, the header is invalid,
     /// or the manifest TOML is malformed.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
-        let path = path.as_ref();
         let header = Header::new(path)?;
         let manifest = header.manifest()?;
-        match header.finished {
-            true => finished::Dataset::new(path.to_path_buf(), manifest).map(Self::Finished),
-            false => {
-                unfinished::Dataset::from_manifest(path.to_path_buf(), manifest)
-                    .map(Self::Unfinished)
+        match header.format {
+            Format::Finished => {
+                finished::Dataset::try_from(manifest).map(Self::Finished)
+            }
+            Format::Unfinished => {
+                unfinished::Dataset::try_from(manifest).map(Self::Unfinished)
             }
         }
     }
@@ -73,5 +73,3 @@ impl Dataset {
         }
     }
 }
-
-

@@ -10,8 +10,6 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
-use std::path::PathBuf;
-
 use crate::Error;
 use crate::format::Manifest;
 use crate::intensities::Intensities;
@@ -37,18 +35,22 @@ pub struct Dataset {
 }
 
 impl Dataset {
-    /// Construct a finished dataset from a path and pre-read [`Manifest`].
-    pub(crate) fn new(path: PathBuf, manifest: Manifest) -> Result<Self, Error> {
+    /// Construct a finished dataset from a [`Manifest`].
+    pub fn new(manifest: Manifest) -> Result<Self, Error> {
+        // TODO Tidy up field constructors
+        let wavelengths = Wavelengths::new(&manifest.path, manifest.wavelengths.clone(), false)?;
+        let measurements = Measurements::new(
+            &manifest.path,
+            manifest.measurements.clone(),
+            false,
+            manifest.timestamp,
+            0,
+        )?;
+        let intensities = Intensities::new(&manifest.path, manifest.intensities.clone(), false)?;
         Ok(Self {
-            wavelengths: Wavelengths::new(path.clone(), manifest.wavelengths.clone(), false)?,
-            measurements: Measurements::new(
-                path.clone(),
-                manifest.measurements.clone(),
-                false,
-                manifest.timestamp,
-                0,
-            )?,
-            intensities: Intensities::new(path, manifest.intensities.clone(), false)?,
+            wavelengths,
+            measurements,
+            intensities,
             manifest,
         })
     }
@@ -56,5 +58,15 @@ impl Dataset {
     /// Borrow the experiment metadata.
     pub const fn manifest(&self) -> &Manifest {
         &self.manifest
+    }
+}
+
+/* ----------------------------------------------------------------------- Trait Implementations */
+
+impl TryFrom<Manifest> for Dataset {
+    type Error = Error;
+
+    fn try_from(manifest: Manifest) -> Result<Self, Self::Error> {
+        Self::new(manifest)
     }
 }

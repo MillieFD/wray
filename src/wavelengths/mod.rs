@@ -15,7 +15,7 @@ pub(crate) mod record;
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, LazyLock};
 
@@ -55,10 +55,11 @@ impl Wavelengths {
     /// When `writable` is `true`, an IPC stream writer is initialised and the
     /// next available ID is restored from existing on-disk records.
     pub(crate) fn new(
-        path: PathBuf,
+        path: impl AsRef<Path>,
         segments: Vec<Segment>,
         writable: bool,
     ) -> Result<Self, Error> {
+        let path = path.as_ref().to_path_buf();
         if writable {
             let existing: Vec<Record> = table::read_stream(&path, &segments)?;
             let next = existing.iter().map(|r| r.id).max().map_or(0, |id| id + 1);

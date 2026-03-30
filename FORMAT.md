@@ -1,76 +1,58 @@
-# `.wray` File Format Specification
+# `Wray` File Format Specification
 
 **Version:** 1
 
-A `.wray` file stores spatially located optical spectroscopy data in three
-normalised Apache Arrow IPC tables, preceded by a fixed-size binary header
-and a UTF-8 TOML manifest.
+A `.wr` file stores optical spectroscopy data in three normalised Apache Arrow
+IPC tables, alongside a fixed-size binary header and UTF-8 TOML manifest.
 
 ---
 
 ## 1. Binary Layout
 
 ```
-Offset  Size     Contents
-──────  ───────  ──────────────────────────────────────
-0       4        Magic bytes: b"WRAY"
-4       4        Format version: u32 LE = 1
-8       8        manifest_len: u64 LE
-16      8        wavelengths_len: u64 LE
-24      8        measurements_len: u64 LE
-32      8        intensities_len: u64 LE
-40      M        Manifest (UTF-8 TOML, manifest_len bytes)
-40+M    W        Wavelengths Arrow IPC stream (wavelengths_len bytes)
-40+M+W  S        Measurements Arrow IPC stream (measurements_len bytes)
-40+M+W+S I      Intensities Arrow IPC stream (intensities_len bytes)
+Field             Type    Size    Offset   Contents
+────────────────  ──────  ──────  ───────  ─────────────────────────────────────
+Magic Bytes       UTF-8   4       0        Identify the format with b"WRAY"
+Manifest Offset   u64 LE  4       8        Byte offset of the TOML manifest
+Manifest Length   u64 LE  8       12       Length of the TOML manifest in bytes
+Format Version    u8      1       20       Identifies the schema version
+File Type         u8      1       21       Identifies the file variant
+Data Segments     Arrow   …       22       One or more Apache Arrow IPC segments
+Manifest          UTF-8   M       FIN      File metadata TOML key-value pairs
 ```
 
-The header is exactly **40 bytes**. Section byte ranges are derived sequentially:
+The header is exactly **22 bytes**. The manifest is located at `manifest_offset`
+from the start of the file and is `manifest_len` bytes long. All multi-byte
+integers are **little-endian**.
 
-| Section       | Start          | Length             |
-|---------------|----------------|--------------------|
-| Manifest      | 40             | `manifest_len`     |
-| Wavelengths   | 40 + M         | `wavelengths_len`  |
-| Measurements  | 40 + M + W     | `measurements_len` |
-| Intensities   | 40 + M + W + S | `intensities_len`  |
+### File Types
 
-All multi-byte integers are **little-endian**.
+| Value | Name         | Description                                                     |
+|-------|--------------|-----------------------------------------------------------------|
+| `0`   | `Unfinished` | Arrow IPC **stream** format — supports reading and appending    |
+| `1`   | `Finished`   | Arrow IPC **file** format — compression and random-access reads |
+
+Additional file types may be defined in future format versions.
 
 ---
 
-## 2. Manifest (TOML)
+## 2. Manifest TOML
 
 ```toml
 version = 1.0
-timestamp = 1742345678901234   # Absolute UNIX epoch microseconds (i64)
-calibrations = [3, 7]          # Measurement IDs flagged as calibrations
-finished = false               # True only when explicitly finalised
+timestamp = 1742345678901234   # Microseconds since UNIX epoch
+calibrations = [3, 7]          # Calibration measurement IDs
 
 [units]
-x = "mm"                       # Valid: "nm", "um", "mm", "m"
+x = "mm"
 y = "mm"
 z = "um"
-a = "deg"                      # Valid: "deg", "rad"
+a = "rad"
 ```
-
-| Key               | Type       | Description                                              |
-|-------------------|------------|----------------------------------------------------------|
-| `version`         | `f64`      | Format version. Readers must reject unknown versions.    |
-| `timestamp`       | `i64`      | UNIX epoch in microseconds when the dataset was created. |
-| `calibrations`    | `[u32]`    | Measurement IDs that are calibration measurements.       |
-| `finished`        | `bool`     | Whether the experiment was explicitly finalised.         |
-| `units.x`         | `string?`  | Storage unit for x coordinate axis (omitted if unused).  |
-| `units.y`         | `string?`  | Storage unit for y coordinate axis.                      |
-| `units.z`         | `string?`  | Storage unit for z coordinate axis.                      |
-| `units.a`         | `string?`  | Storage unit for angle coordinate axis.                  |
 
 ---
 
 ## 3. Arrow Schemas
-
-All Arrow IPC sections use **stream format** with **ZSTD compression** per
-record batch. Each stream ends with the standard 8-byte EOS sentinel
-(`0xFFFFFFFF 0x00000000`).
 
 ### Wavelengths
 
@@ -82,14 +64,16 @@ record batch. Each stream ends with the standard 8-byte EOS sentinel
 ### Measurements
 
 | Column        | Arrow Type | Nullable | Description                                            |
-|---------------|------------|----------|--------------------------------------------------------|
-| `id`          | `UInt32`   | No       | Auto-incremented measurement ID                        |
-| `timestamp`   | `UInt64`   | No       | Microsecond offset from `manifest.timestamp`           |
-| `x`           | `Float32`  | Yes      | X coordinate in `units.x` (null if axis unused)        |
-| `y`           | `Float32`  | Yes      | Y coordinate in `units.y`                              |
-| `z`           | `Float32`  | Yes      | Z coordinate in `units.z`                              |
-| `a`           | `Float32`  | Yes      | Angle coordinate in `units.a`                          |
-| `integration` | `UInt64`   | No       | Integration time in microseconds                       |
+|---------------|------------|----------|-------------------------------------------------------|
+| `id`          | `UInt32`   | No       | Auto-incremented measurement ID                       |
+| `timestamp`   | `UInt64`   | No       | Microsecond offset from `manifest.timestamp`          |
+| `x`           | `Float32`  | Yes      | X coordinate in `manifest.units.x` or Null if unused. |
+| `y`           | `Float32`  | Yes      | Y coordinate in `manifest.units.y` or Null if unused. |
+| `z`           | `Float32`  | Yes      | Z coordinate in `manifest.units.z` or Null if unused. |
+| `a`           | `Float32`  | Yes      | A coordinate in `manifest.units.a` or Null if unused. |
+| `b`           | `Float32`  | Yes      | B coordinate in `manifest.units.b` or Null if unused. |
+| `c`           | `Float32`   | Yes      | C coordinate in `manifest.units.c` or Null if unused. |
+| `integration` | `UInt64`    | No       | Integration time in microseconds                       |
 
 ### Intensities
 
@@ -103,18 +87,15 @@ record batch. Each stream ends with the standard 8-byte EOS sentinel
 
 ## 4. Version Upgrade Policy
 
-Readers **must** check `manifest.version` and reject versions they do not
-understand. New minor-version additions (new optional manifest keys, new
-nullable columns) should preserve backwards compatibility. Major-version
-changes may alter the header layout or schema.
+Readers **must** check the format version byte (offset 20 B) and reject
+any unrecognised version. Minor-version changes should preserve backwards
+compatibility. Major-version changes may alter the header layout or schema.
 
 ---
 
 ## 5. Cross-Language Compatibility
 
-- All Arrow types are standard primitives — no extension types or
+- All Arrow types are standard primitives; no extension types or
   language-specific encodings.
 - The manifest is UTF-8 TOML, parseable in every major language.
-- The 40-byte header uses fixed-width little-endian integers, trivial
-  to parse with `seek` + `read`.
-- All section offsets are in the header — no seek-and-scan required.
+- The header uses fixed-width LE numbers parsed with `seek` + `read`.

@@ -35,7 +35,7 @@ use crate::wavelengths::Wavelengths;
 ///    [`snapshot`](Self::snapshot).
 pub struct Dataset {
     /// Experiment metadata.
-    manifest: Manifest,
+    pub manifest: Manifest,
     /// Wavelengths table.
     pub wavelengths: Wavelengths,
     /// Measurements table.
@@ -76,6 +76,7 @@ impl Dataset {
 
     /// Borrow the experiment metadata.
     pub const fn manifest(&self) -> &Manifest {
+        // TODO Remove accessor fn in favour of direct access to dataset.manifest
         &self.manifest
     }
 
@@ -146,6 +147,7 @@ impl Dataset {
 
     /// Flush pending data and write to disk.
     fn write_to_disk(&mut self) -> Result<(), Error> {
+        // TODO Remove fn. Callers should use write_segmented directly.
         self.write_segmented()
     }
 

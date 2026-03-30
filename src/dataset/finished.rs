@@ -25,7 +25,7 @@ use crate::wavelengths::Wavelengths;
 /// or [`unfinished::Dataset::finish`](super::unfinished::Dataset::finish).
 pub struct Dataset {
     /// Experiment metadata.
-    manifest: Manifest,
+    pub manifest: Manifest,
     /// Wavelengths table (read-only).
     pub wavelengths: Wavelengths,
     /// Measurements table (read-only).
@@ -47,6 +47,7 @@ impl Dataset {
 
     /// Borrow the experiment metadata.
     pub const fn manifest(&self) -> &Manifest {
+        // TODO Remove accessor fn in favour of direct access to dataset.manifest
         &self.manifest
     }
 }

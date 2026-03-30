@@ -35,9 +35,6 @@ pub enum Dataset {
 impl Dataset {
     /// Open an existing `.wr` file.
     ///
-    /// Returns [`Unfinished`](Self::Unfinished) for appendable files and
-    /// [`Finished`](Self::Finished) for sealed read-only files.
-    ///
     /// # Errors
     ///
     /// Returns [`Error`] if the file cannot be read, the header is invalid,
@@ -46,20 +43,16 @@ impl Dataset {
         let header = Header::new(path)?;
         let manifest = header.manifest()?;
         match header.format {
-            Format::Finished => {
-                finished::Dataset::try_from(manifest).map(Self::Finished)
-            }
-            Format::Unfinished => {
-                unfinished::Dataset::try_from(manifest).map(Self::Unfinished)
-            }
+            Format::Finished => finished::Dataset::try_from(manifest).map(Self::Finished),
+            Format::Unfinished => unfinished::Dataset::try_from(manifest).map(Self::Unfinished),
         }
     }
 
     /// Borrow the experiment metadata.
     pub fn manifest(&self) -> &Manifest {
         match self {
-            Self::Unfinished(ds) => ds.manifest(),
-            Self::Finished(ds) => ds.manifest(),
+            Self::Unfinished(dataset) => &dataset.manifest,
+            Self::Finished(dataset) => &dataset.manifest,
         }
     }
 

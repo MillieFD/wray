@@ -82,7 +82,7 @@ impl Dataset {
     ///
     /// Returns [`Error`] if the file cannot be written.
     pub fn close(mut self) -> Result<(), Error> {
-        self.write_to_disk()?;
+        self.write_segmented()?;
         std::mem::forget(self);
         Ok(())
     }
@@ -112,7 +112,7 @@ impl Dataset {
     ///
     /// Returns [`Error`] if either file cannot be written or consolidated.
     pub fn snapshot(&mut self, path: impl AsRef<Path>) -> Result<super::finished::Dataset, Error> {
-        self.write_to_disk()?;
+        self.write_segmented()?;
         let manifest = self.write_finished(path.as_ref())?;
         super::finished::Dataset::new(manifest)
     }
@@ -137,12 +137,6 @@ impl Dataset {
             intensities,
             manifest,
         })
-    }
-
-    /// Flush pending data and write to disk.
-    fn write_to_disk(&mut self) -> Result<(), Error> {
-        // TODO Remove fn. Callers should use write_segmented directly.
-        self.write_segmented()
     }
 
     /// Extract pending bytes, append as new segments, rewrite file.
@@ -309,6 +303,6 @@ impl TryFrom<Manifest> for Dataset {
 
 impl Drop for Dataset {
     fn drop(&mut self) {
-        let _ = self.write_to_disk();
+        let _ = self.write_segmented();
     }
 }

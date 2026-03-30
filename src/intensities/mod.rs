@@ -15,7 +15,7 @@ pub(crate) mod record;
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
 
 use arrow::datatypes::DataType::{Float64, UInt16, UInt32};
@@ -23,9 +23,9 @@ use arrow::datatypes::{Field, Schema};
 
 use self::builder::Builder;
 use self::record::Record;
-use crate::Error;
 use crate::format::Segment;
 use crate::table::{self, Ipc, Sink};
+use crate::{Error, Manifest};
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
@@ -46,17 +46,16 @@ impl Intensities {
     /// Create or open an intensities table for the dataset at `path`.
     ///
     /// When `writable` is `true`, an IPC stream writer is initialised.
-    pub(crate) fn new(
-        path: impl AsRef<Path>,
-        segments: Vec<Segment>,
-        writable: bool,
-    ) -> Result<Self, Error> {
-        let path = path.as_ref().to_path_buf();
-        let ipc = match writable {
-            true => Some(Ipc::new(Self::new_stream()?, Self::schema(), Builder::default())),
-            false => None,
-        };
-        Ok(Self { ipc, path, segments })
+    pub(crate) fn new(manifest: &Manifest) -> Result<Self, Error> {
+        Ok(Self {
+            ipc: Some(Ipc::new(
+                Self::new_stream()?,
+                Self::schema(),
+                Builder::default(),
+            )),
+            path: manifest.path.clone(),
+            segments: Vec::new(),
+        })
     }
 
     /// Record intensity values for a single measurement.
@@ -73,6 +72,7 @@ impl Intensities {
         ipc.builder.push(measurement, wavelengths, intensities);
         self.check()
     }
+
     /// Read all intensity records from the dataset.
     ///
     /// Automatically selects stream-based or memory-mapped reading based on
@@ -105,7 +105,10 @@ impl Sink for Intensities {
     }
 
     fn check(&mut self) -> Result<(), Error> {
-        self.ipc.as_mut().expect("dataset open for writing").try_flush()
+        self.ipc
+            .as_mut()
+            .expect("dataset open for writing")
+            .try_flush()
     }
 
     fn reset(&mut self, segments: Vec<Segment>) -> Result<(), Error> {
@@ -128,4 +131,3 @@ impl Sink for Intensities {
         table::consolidate(&self.path, &self.segments, &Self::SCHEMA)
     }
 }
-

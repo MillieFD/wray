@@ -302,3 +302,14 @@ impl Header {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn magic() {
+        // Magic bytes identify the WRAY format and must remain stable across versions.
+        assert_eq!(MAGIC, &[87, 82, 65, 89])
+    }
+}

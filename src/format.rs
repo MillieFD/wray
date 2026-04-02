@@ -28,15 +28,28 @@ pub(super) const MAGIC: &[u8; 4] = b"WRAY";
 /// Format version number.
 pub(super) const VERSION: u8 = 1;
 
-/// Length (in bytes) of the fixed-size file header.
+/// Length of the fixed-size file `header` in bytes.
 ///
-/// Derived at compile time from the sizes of its constituent fields:
-/// `MAGIC(4) + manifest_offset(8) + manifest_len(8) + VERSION(1) + file_type(1)`.
-pub(super) const HEADER: usize = size_of::<[u8; 4]>()  // MAGIC
-    + size_of::<u64>()  // manifest_offset
-    + size_of::<u64>()  // manifest_len
-    + size_of::<u8>()   // VERSION
-    + size_of::<u8>();  // file_type
+/// ```
+/// Field             Type    Size    Offset   Contents
+/// ────────────────  ──────  ──────  ───────  ─────────────────────────────────────
+/// Magic Bytes       UTF-8   4       0        Identifies the format with b"WRAY"
+/// Format Version    u8      1       4        Specifies the schema version
+/// File Type         u8      1       5        Describes the file variant
+/// Manifest Offset   u64 LE  8       6        Byte offset of the TOML manifest
+/// Manifest Length   u64 LE  8       14       Length of the TOML manifest in bytes
+/// Data Segments     Arrow   …       22       One or more Apache Arrow IPC segments
+/// Manifest          UTF-8   M       EOF      File metadata TOML key-value pairs
+/// ```
+///
+/// The header is exactly **22 bytes**. The manifest is located at `manifest_offset`
+/// from the start of the file and is `manifest_length` bytes long. All multibyte
+/// integers are **little-endian**.
+pub(super) const HEADER: usize = size_of::<[u8; 4]>() // Magic bytes
+    + size_of::<u8>()   // Format version
+    + size_of::<u8>()   // File type
+    + size_of::<u64>()  // Manifest offset
+    + size_of::<u64>(); // Manifest length
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
@@ -94,9 +107,9 @@ pub struct Config {
 /// File type stored as a single byte (`u8`) in the binary header.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Format {
-    /// Arrow IPC stream format — supports reading and appending.
+    /// Arrow IPC stream format optimised for appending new data.
     Unfinished,
-    /// Arrow IPC file format — compression and random-access reads.
+    /// Arrow IPC file format optimised for random-access reads.
     Finished,
 }
 
@@ -212,13 +225,11 @@ impl Manifest {
 
 /* -------------------------------------------------------------------------------------- Header */
 
-/// The fixed-size header at the start of every `.wr` file.
-///
-/// Layout: `MAGIC(4) + manifest_offset(8) + manifest_len(8) + VERSION(1) + file_type(1)`.
+/// Fixed-size header at the start of every `.wr` file.
 pub(crate) struct Header {
-    /// Path of the `.wr` file this header was read from.
+    /// Path to the dataset file.
     pub path: PathBuf,
-    /// Location of the TOML manifest within the file.
+    /// Location of the TOML manifest.
     pub manifest: Segment,
     /// File type. See [`Format`].
     pub format: Format,
@@ -230,7 +241,7 @@ impl Header {
     where
         P: AsRef<Path>,
     {
-        let mut file = File::open(path.as_ref())?;
+        let mut file = File::open(&path)?;
         let mut header = Self::read(&mut file)?;
         header.path = path.as_ref().to_path_buf();
         Ok(header)
@@ -264,23 +275,30 @@ impl Header {
     fn read<R: Read>(r: &mut R) -> Result<Self, Error> {
         let mut buf = [0u8; HEADER];
         r.read_exact(&mut buf)?;
-        if &buf[0..4] != MAGIC {
-            return Err(Error::InvalidFormat("invalid magic bytes"));
-        }
-        let manifest_offset = u64::from_le_bytes(buf[4..12].try_into().expect("8 bytes"));
-        let manifest_len = u64::from_le_bytes(buf[12..20].try_into().expect("8 bytes"));
-        let version = buf[20];
-        if version != VERSION {
-            return Err(Error::InvalidFormat("unsupported version"));
-        }
-        let format = Format::try_from(buf[21])?;
+        let version = Self::version(&buf)?;
+        let offset = buf[6..14].try_into().map(u64::from_le_bytes)?;
         Ok(Self {
             path: PathBuf::new(),
             manifest: Segment {
-                offset: SeekFrom::Start(manifest_offset),
-                length: manifest_len,
+                offset: SeekFrom::Start(offset),
+                length: buf[14..22].try_into().map(u64::from_le_bytes)?,
             },
-            format,
+            format: Format::try_from(buf[5])?,
         })
+    }
+
+    /// Extract the `WRAY` version number from the provided header bytes. Uses [`MAGIC`] bytes
+    ///
+    /// # Returns
+    /// - [`Ok(u8)`](Ok) if the header is valid.
+    /// - [`Err(Error)`](Err) if the bytes are not a valid `WRAY` header.
+    ///
+    /// # Panics
+    /// - If the `header` slice contains fewer than five elements.
+    fn version(header: &[u8]) -> Result<u8, Error> {
+        match &header[..4] {
+            bytes if bytes == MAGIC => Ok(header[4]),
+            bytes => Err(format!("Invalid magic bytes: {bytes:?}").into()),
+        }
     }
 }

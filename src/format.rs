@@ -203,9 +203,6 @@ pub struct Manifest {
     pub measurements: Vec<Segment>,
     /// File segments containing wavelength data.
     pub wavelengths: Vec<Segment>,
-    /// Path to the `.wr` file on disk. Not serialised to TOML.
-    #[serde(skip)]
-    pub path: PathBuf,
 }
 
 impl Manifest {

@@ -258,16 +258,17 @@ impl Header {
         Ok(manifest)
     }
 
-    /// Write the header to `w`.
+    /// Write the file header to `w`.
     pub fn write<W: Write>(&self, w: &mut W) -> Result<(), Error> {
-        let SeekFrom::Start(offset) = self.manifest.offset else {
-            return Err(Error::InvalidFormat("manifest position must be absolute from file start"));
+        let offset = match self.manifest.offset {
+            SeekFrom::Start(off) => off.to_le_bytes(),
+            other => return Err(Error::new("Offset must be SeekFrom::Start")),
         };
         w.write_all(MAGIC)?;
-        w.write_all(&offset.to_le_bytes())?;
+        w.write_all(&offset)?;
         w.write_all(&self.manifest.length.to_le_bytes())?;
         w.write_all(&[VERSION])?;
-        w.write_all(&[u8::from(self.format)])?;
+        w.write_all(&[self.format.into()])?;
         Ok(())
     }
 

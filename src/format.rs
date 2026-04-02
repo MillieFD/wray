@@ -126,7 +126,7 @@ impl TryFrom<u8> for Format {
 /// A contiguous byte range of Arrow IPC data within the file.
 #[derive(Debug, Clone)]
 pub struct Segment {
-    /// Byte offset from the start of the file.
+    /// Byte offset to the start of the segment.
     pub offset: SeekFrom,
     /// Length in bytes.
     pub length: u64,

@@ -42,6 +42,12 @@ impl Display for Error {
 
 impl std::error::Error for Error {}
 
+impl From<String> for Error {
+    fn from(msg: String) -> Self {
+        Self::new(msg)
+    }
+}
+
 impl From<ArrowError> for Error {
     fn from(e: ArrowError) -> Self {
         Self::new(e)

@@ -10,6 +10,7 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
+use std::array::TryFromSliceError;
 use std::fmt::{Debug, Display, Formatter};
 use std::str::Utf8Error;
 
@@ -74,6 +75,12 @@ impl From<toml::de::Error> for Error {
 
 impl From<Utf8Error> for Error {
     fn from(e: Utf8Error) -> Self {
+        Self::new(e)
+    }
+}
+
+impl From<TryFromSliceError> for Error {
+    fn from(e: TryFromSliceError) -> Self {
         Self::new(e)
     }
 }

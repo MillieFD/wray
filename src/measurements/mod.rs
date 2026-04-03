@@ -77,7 +77,7 @@ impl Measurements {
     /// All optional coordinate fields are feature-gated. Unneeded fields can be
     /// disabled in `cargo.toml` for improved ergonomics. This does not change
     /// the underlying `schema`.
-    #[allow(clippy::too_many_arguments, reason = "User may require all fields")]
+    #[allow(clippy::too_many_arguments, reason = "user may require all fields")]
     pub fn push(
         &mut self,
         #[cfg(feature = "x")] x: Option<f32>,
@@ -90,14 +90,13 @@ impl Measurements {
     ) -> Result<u32, Error> {
         let now: u64 = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("system clock before unix epoch")
+            .map_err(Into::<Error>::into)? // Great Scott! System clock before Unix epoch.
             .as_micros()
-            .try_into()
-            .expect("microsecond timestamp exceeds u64");
+            .try_into()?; // Overflows u64
         let timestamp = now.saturating_sub(self.epoch);
         let id = self.next.fetch_add(1, Ordering::SeqCst);
-        let ipc = self.ipc.as_mut().expect("dataset open for writing");
-        ipc.builder
+        self.ipc
+            .builder
             .push(id, timestamp, x, y, z, a, b, c, integration);
         self.check()?;
         Ok(id)

@@ -12,7 +12,9 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 use std::array::TryFromSliceError;
 use std::fmt::{Debug, Display, Formatter};
+use std::num::TryFromIntError;
 use std::str::Utf8Error;
+use std::time::SystemTimeError;
 
 use arrow::error::ArrowError;
 use serde::{Deserialize, Serialize};
@@ -81,6 +83,18 @@ impl From<Utf8Error> for Error {
 
 impl From<TryFromSliceError> for Error {
     fn from(e: TryFromSliceError) -> Self {
+        Self::new(e)
+    }
+}
+
+impl From<TryFromIntError> for Error {
+    fn from(e: TryFromIntError) -> Self {
+        Self::new(e)
+    }
+}
+
+impl From<SystemTimeError> for Error {
+    fn from(e: SystemTimeError) -> Self {
         Self::new(e)
     }
 }

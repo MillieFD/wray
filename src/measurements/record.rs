@@ -69,7 +69,16 @@ impl table::Record for Record {
 }
 
 impl Display for Record {
+    /// Formats the value using the given formatter.
+    ///
+    /// # Display or Debug?
+    ///
+    /// Use [`Display`] to show measurement ID and timestamp; the minimum information required
+    /// to uniquely identify a record. Use [`Debug`][1] to show the full record, including
+    /// coordinates and integration time. See trait-level documentation for more information.
+    ///
+    /// [1]: std::fmt::Debug
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Record {{ id: {}, timestamp: {} µs }}", self.id, self.timestamp)
+        write!(f, "{{ id: {}, timestamp: {} µs }}", self.id, self.timestamp)
     }
 }

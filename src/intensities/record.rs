@@ -53,6 +53,15 @@ impl table::Record for Record {
 }
 
 impl Display for Record {
+    /// Formats the value using the given formatter.
+    ///
+    /// # Display or Debug?
+    ///
+    /// Use [`Display`] to show the intensity value only e.g. when printing results to `stout`.
+    /// Use [`Debug`][1] to show the full record including measurement and wavelength IDs.
+    /// See trait-level documentation for more information.
+    ///
+    /// [1]: core::fmt::Debug
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.intensity.fmt(f)
     }

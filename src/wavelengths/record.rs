@@ -60,6 +60,14 @@ impl table::Record for Record {
 }
 
 impl Display for Record {
+    /// Formats the value using the given formatter.
+    ///
+    /// # Display or Debug?
+    ///
+    /// Use [`Display`] to show the wavelength value with units (nm). Use [`Debug`][1] to show the
+    /// full record including wavelength ID. See trait-level documentation for more information.
+    ///
+    /// [1]: std::fmt::Debug
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} nm", self.nm)
     }

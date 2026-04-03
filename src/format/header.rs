@@ -14,8 +14,8 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use super::Segment;
-use crate::{Error, Format, Manifest};
+use super::{Segment, Manifest};
+use crate::{Error, Format};
 
 /* ----------------------------------------------------------------------------------- Constants */
 

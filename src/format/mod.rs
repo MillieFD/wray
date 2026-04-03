@@ -9,12 +9,14 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 */
 
 mod header;
+mod manifest;
 mod segment;
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
 use serde::{Deserialize, Serialize};
 
+use self::manifest::Manifest;
 use self::segment::Segment;
 use crate::Error;
 
@@ -97,39 +99,6 @@ impl TryFrom<u8> for Format {
             0 => Ok(Self::Unfinished),
             1 => Ok(Self::Finished),
             _ => Err(crate::Error::InvalidFormat("unknown file type")),
-        }
-    }
-}
-
-/* ------------------------------------------------------------------------------------ Manifest */
-
-/// Experiment-level metadata stored in every `.wr` file.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Manifest {
-    /// Absolute dataset initialisation timestamp in microseconds relative to the UNIX epoch.
-    pub timestamp: u64,
-    /// Calibration measurement IDs.
-    pub calibrations: Vec<u32>,
-    /// Dataset configuration.
-    pub cfg: Config,
-    /// File segments containing intensity data
-    pub intensities: Vec<Segment>,
-    /// File segments containing measurements data.
-    pub measurements: Vec<Segment>,
-    /// File segments containing wavelength data.
-    pub wavelengths: Vec<Segment>,
-}
-
-impl Manifest {
-    /// Create a new [`Manifest`] for the given file `path`, creation timestamp, and [`Config`].
-    pub(crate) fn new(timestamp: u64, cfg: Config) -> Self {
-        Self {
-            timestamp,
-            calibrations: Vec::new(),
-            cfg,
-            intensities: Vec::new(),
-            measurements: Vec::new(),
-            wavelengths: Vec::new(),
         }
     }
 }

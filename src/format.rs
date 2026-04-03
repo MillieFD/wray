@@ -239,20 +239,27 @@ impl Header {
         P: AsRef<Path>,
     {
         let mut file = File::open(&path)?;
-        let mut header = Self::read(&mut file)?;
-        header.path = path.as_ref().to_path_buf();
-        Ok(header)
+        let mut buf = [0u8; HEADER];
+        file.read_exact(&mut buf)?;
+        let version = Self::version(&buf)?;
+        let offset = buf[6..14].try_into().map(u64::from_le_bytes)?;
+        Ok(Self {
+            path: path.as_ref().to_path_buf(),
+            manifest: Segment {
+                offset: SeekFrom::Start(offset),
+                length: buf[14..22].try_into().map(u64::from_le_bytes)?,
+            },
+            format: Format::try_from(buf[5])?,
+        })
     }
 
     /// Read and parse the manifest TOML from this header's file.
     pub fn manifest(&self) -> Result<Manifest, Error> {
         let mut file = File::open(&self.path)?;
-        file.seek(self.manifest.offset)?;
         let mut buf = vec![0u8; self.manifest.length as usize];
+        file.seek(self.manifest.offset)?;
         file.read_exact(&mut buf)?;
-        let mut manifest: Manifest = toml::from_str(std::str::from_utf8(&buf)?)?;
-        manifest.path = self.path.clone();
-        Ok(manifest)
+        toml::from_slice(&buf).map_err(Error::from)
     }
 
     /// Write the file header to `w`.
@@ -267,22 +274,6 @@ impl Header {
         w.write_all(&[VERSION])?;
         w.write_all(&[self.format.into()])?;
         Ok(())
-    }
-
-    /// Read and validate the header from `r`.
-    fn read<R: Read>(r: &mut R) -> Result<Self, Error> {
-        let mut buf = [0u8; HEADER];
-        r.read_exact(&mut buf)?;
-        let version = Self::version(&buf)?;
-        let offset = buf[6..14].try_into().map(u64::from_le_bytes)?;
-        Ok(Self {
-            path: PathBuf::new(),
-            manifest: Segment {
-                offset: SeekFrom::Start(offset),
-                length: buf[14..22].try_into().map(u64::from_le_bytes)?,
-            },
-            format: Format::try_from(buf[5])?,
-        })
     }
 
     /// Extract the `WRAY` version number from the provided header bytes. Uses [`MAGIC`] bytes

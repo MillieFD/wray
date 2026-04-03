@@ -42,7 +42,7 @@ pub(super) const VERSION: u8 = 1;
 /// The header is exactly **22 bytes**. The manifest is located at `manifest_offset`
 /// from the start of the file and is `manifest_length` bytes long. All multibyte
 /// integers are **little-endian**.
-pub(super) const HEADER: usize = size_of::<[u8; 4]>() // Magic bytes
+pub(crate) const HEADER: usize = size_of::<[u8; 4]>() // Magic bytes
     + size_of::<u8>()   // Format version
     + size_of::<u8>()   // File type
     + size_of::<u64>()  // Manifest offset

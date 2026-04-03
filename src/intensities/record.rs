@@ -22,13 +22,9 @@ use crate::table;
 /// A single intensity entry returned by read queries.
 #[derive(Copy, Clone, Debug, Default, PartialEq, PartialOrd)]
 pub struct Record {
-    /// Measurement ID. Foreign key to the [`measurements`][1] table.
-    ///
-    /// [1]: crate::measurements::Measurements
+    /// Measurement ID. Foreign key to [`measurements`](crate::measurements::Measurements).
     pub measurement: u32,
-    /// Wavelength ID. Foreign key to the [`wavelengths`][1] table.
-    ///
-    /// [1]: crate::wavelengths::Wavelengths
+    /// Wavelength ID. Foreign key to [`wavelengths`](crate::wavelengths::Wavelengths).
     pub wavelength: u16,
     /// Measured spectral intensity.
     pub intensity: f64,

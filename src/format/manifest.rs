@@ -10,6 +10,8 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
+use std::path::{Path, PathBuf};
+
 use serde::{Deserialize, Serialize};
 
 use crate::Config;
@@ -20,6 +22,8 @@ use crate::format::segment::Segment;
 /// Experiment-level metadata stored in every `.wr` file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
+    /// Path to the dataset file.
+    pub path: PathBuf,
     /// Dataset initialisation timestamp in microseconds after the UNIX epoch.
     pub timestamp: u64,
     /// Calibration measurement IDs.
@@ -36,8 +40,12 @@ pub struct Manifest {
 
 impl Manifest {
     /// Create a new [`Manifest`] for the given creation timestamp and [`Config`].
-    pub(in crate::format) fn new(timestamp: u64, cfg: Config) -> Self {
+    pub(in crate::format) fn new<P>(path: P, timestamp: u64, cfg: Config) -> Self
+    where
+        P: AsRef<Path>,
+    {
         Self {
+            path: path.as_ref().to_path_buf(),
             timestamp,
             calibrations: Vec::new(),
             cfg,

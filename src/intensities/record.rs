@@ -8,6 +8,8 @@ Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the conditions of the LICENSE are met.
 */
 
+/* ----------------------------------------------------------------------------- Private Imports */
+
 use std::fmt::{Display, Formatter};
 
 use arrow::array::{AsArray, RecordBatch};
@@ -20,9 +22,13 @@ use crate::table;
 /// A single intensity entry returned by read queries.
 #[derive(Copy, Clone, Debug, Default, PartialEq, PartialOrd)]
 pub struct Record {
-    /// Measurement ID. Foreign key to the measurements table.
+    /// Measurement ID. Foreign key to the [`measurements`][1] table.
+    ///
+    /// [1]: crate::measurements::Measurements
     pub measurement: u32,
-    /// Wavelength ID. Foreign key to the wavelengths table.
+    /// Wavelength ID. Foreign key to the [`wavelengths`][1] table.
+    ///
+    /// [1]: crate::wavelengths::Wavelengths
     pub wavelength: u16,
     /// Measured spectral intensity.
     pub intensity: f64,

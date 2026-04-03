@@ -35,17 +35,17 @@ impl table::Record for Record {
         Self {
             measurement: batch
                 .column_by_name("measurement")
-                .expect("missing 'measurement' column")
+                .expect("Missing 'measurement' column")
                 .as_primitive::<UInt32Type>()
                 .value(row),
             wavelength: batch
                 .column_by_name("wavelength")
-                .expect("missing 'wavelength' column")
+                .expect("Missing 'wavelength' column")
                 .as_primitive::<UInt16Type>()
                 .value(row),
             intensity: batch
                 .column_by_name("intensity")
-                .expect("missing 'intensity' column")
+                .expect("Missing 'intensity' column")
                 .as_primitive::<Float64Type>()
                 .value(row),
         }

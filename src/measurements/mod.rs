@@ -88,12 +88,11 @@ impl Measurements {
         #[cfg(feature = "c")] c: Option<f32>,
         integration: u32,
     ) -> Result<u32, Error> {
-        let now: u64 = SystemTime::now()
+        let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .map_err(Into::<Error>::into)? // Great Scott! System clock before Unix epoch.
-            .as_micros()
-            .try_into()?; // Overflows u64
-        let timestamp = now.saturating_sub(self.epoch);
+            .as_micros();
+        let timestamp: u64 = now.saturating_sub(self.epoch as u128).try_into()?;
         let id = self.next.fetch_add(1, Ordering::SeqCst);
         self.ipc
             .builder

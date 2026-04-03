@@ -35,7 +35,7 @@ pub struct Manifest {
 }
 
 impl Manifest {
-    /// Create a new [`crate::Manifest`] for the given creation timestamp and [`Config`].
+    /// Create a new [`Manifest`] for the given creation timestamp and [`Config`].
     pub(in crate::format) fn new(timestamp: u64, cfg: Config) -> Self {
         Self {
             timestamp,

@@ -33,6 +33,7 @@ pub struct Record {
 /* ----------------------------------------------------------------------- Trait Implementations */
 
 impl table::Record for Record {
+    /// Deserialize the [`Record`] from the borrowed [`RecordBatch`] at the specified `row` index.
     fn read(batch: &RecordBatch, row: usize) -> Self {
         Self {
             measurement: batch

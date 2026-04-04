@@ -30,7 +30,7 @@ pub(super) struct Builder {
     wavelength: UInt16Builder,
     /// Measured spectral intensities.
     intensity: Float64Builder,
-    /// Number of pending rows.
+    /// Number of pending [`records`](super::Record).
     len: usize,
 }
 
@@ -49,6 +49,7 @@ impl Builder {
 /* ----------------------------------------------------------------------- Trait Implementations */
 
 impl Build for Builder {
+    /// Returns the number of pending [`records`](super::Record) in the [`Builder`].
     fn len(&self) -> usize {
         self.len
     }

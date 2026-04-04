@@ -44,9 +44,7 @@ pub struct Intensities {
 }
 
 impl Intensities {
-    /// Create or open an intensities table for the dataset at `path`.
-    ///
-    /// When `writable` is `true`, an IPC stream writer is initialised.
+    /// TODO add doc comment
     pub(crate) fn new(manifest: &Manifest) -> Result<Self, Error> {
         Ok(Self {
             ipc: Some(Ipc::new(
@@ -55,7 +53,7 @@ impl Intensities {
                 Builder::default(),
             )),
             path: manifest.path.clone(),
-            segments: Vec::new(),
+            segments: Vec::new(), // TODO add fn to extract intensity Segments from manifest.toml
         })
     }
 

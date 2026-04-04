@@ -27,12 +27,16 @@ use crate::wavelengths::Wavelengths;
 ///
 /// # Lifecycle
 ///
-/// 1. **Create** a new file with [`new`](Self::new).
+/// 1. **Create** a new file with [`new`][1].
 /// 2. **Push** wavelengths, measurements, and intensities via the public table fields.
-/// 3. [`close`](Self::close) the file once all data has been written.
-/// 4. Reopen with [`new`](Self::new) to append additional data.
-/// 5. Seal with [`finish`](Self::finish) for read-only access, or create a snapshot with
-///    [`snapshot`](Self::snapshot).
+/// 3. [`close`][2] the file once all data has been written.
+/// 4. Reopen with [`new`][1] to append additional data.
+/// 5. Seal with [`finish`][3] for read-only access, or create a snapshot with [`snapshot`][4].
+///
+/// [1]: Self::new
+/// [2]: Self::close
+/// [3]: Self::finish
+/// [4]: Self::snapshot
 pub struct Dataset {
     /// Experiment metadata.
     pub manifest: Manifest,

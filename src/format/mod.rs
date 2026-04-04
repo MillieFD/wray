@@ -14,10 +14,13 @@ mod segment;
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
+use std::fmt::{Display, Formatter};
+
 use serde::{Deserialize, Serialize};
 
-use self::manifest::Manifest;
-use self::segment::Segment;
+pub(crate) use self::header::{HEADER, Header};
+pub(crate) use self::manifest::Manifest;
+pub(crate) use self::segment::Segment;
 use crate::Error;
 
 /* ------------------------------------------------------------------------------ Public Exports */
@@ -37,8 +40,8 @@ pub enum Units {
 
 /* ----------------------------------------------------------------------- Trait Implementations */
 
-impl core::fmt::Display for Units {
-    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+impl Display for Units {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Length => f.write_str("m"),
             Self::Angle => f.write_str("rad"),
@@ -74,6 +77,7 @@ pub struct Config {
 /* --------------------------------------------------------------------------------- Format Enum */
 
 /// File type stored as a single byte (`u8`) in the binary header.
+// TODO ? remove Format enum and unfinished::Dataset struct in favour of universal Arrow feather
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Format {
     /// Arrow IPC stream format optimised for appending new data.
@@ -92,13 +96,13 @@ impl From<Format> for u8 {
 }
 
 impl TryFrom<u8> for Format {
-    type Error = crate::Error;
+    type Error = Error;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(Self::Unfinished),
             1 => Ok(Self::Finished),
-            _ => Err(crate::Error::InvalidFormat("unknown file type")),
+            _ => Err(format!("{value} is not a known format type").into()),
         }
     }
 }

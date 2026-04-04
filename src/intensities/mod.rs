@@ -32,8 +32,8 @@ use crate::{Error, Manifest};
 /// Each row maps a `(measurement, wavelength)` pair to an intensity value.
 /// Rows are auto-flushed to the in-memory IPC stream every 32 768 rows.
 pub struct Intensities {
-    /// IPC stream writer (`None` when read-only).
-    ipc: Option<Ipc<Builder>>,
+    /// IPC stream writer for appending new intensity measurements.
+    ipc: Ipc<Builder>,
     /// Path to the dataset file.
     path: PathBuf,
     /// Location descriptors for written intensity segments.

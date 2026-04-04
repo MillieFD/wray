@@ -38,7 +38,7 @@ use crate::{Error, Manifest};
 /// are nullable `Float32`.
 pub struct Measurements {
     /// IPC stream writer (`None` when read-only).
-    ipc: Option<Ipc<Builder>>,
+    ipc: Ipc<Builder>,
     /// Next auto-increment measurement ID.
     next: AtomicU32,
     /// Manifest epoch in microseconds since UNIX epoch.
@@ -50,14 +50,10 @@ pub struct Measurements {
 }
 
 impl Measurements {
-    /// Create or open a measurements table for the dataset at `path`.
+    /// Create or open a measurement table for the dataset at `path`.
     pub(crate) fn new(manifest: &Manifest) -> Result<Self, Error> {
         Ok(Self {
-            ipc: Some(Ipc::new(
-                Self::new_stream()?,
-                Self::schema(),
-                Builder::default(),
-            )),
+            ipc: Ipc::new(Self::new_stream()?, Self::schema(), Builder::default()),
             next: table::read_stream(&manifest.path, &manifest.measurements)?
                 .iter()
                 .map(|r: &Record| r.id)
@@ -135,7 +131,7 @@ impl Sink for Measurements {
     });
 
     fn write(&mut self) -> Result<(), Error> {
-        self.ipc.as_mut().expect("dataset open for writing").flush()
+        self.ipc.flush()
     }
 
     fn check(&mut self) -> Result<(), Error> {
@@ -143,6 +139,7 @@ impl Sink for Measurements {
             .as_mut()
             .expect("dataset open for writing")
             .try_flush()
+            .map_err(Into::into)
     }
 
     fn reset(&mut self, segments: Vec<Segment>) -> Result<(), Error> {

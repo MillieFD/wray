@@ -47,11 +47,7 @@ impl Intensities {
     /// TODO add doc comment
     pub(crate) fn new(manifest: &Manifest) -> Result<Self, Error> {
         Ok(Self {
-            ipc: Some(Ipc::new(
-                Self::new_stream()?,
-                Self::schema(),
-                Builder::default(),
-            )),
+            ipc: Ipc::new(Self::new_stream()?, Self::schema(), Builder::default()),
             path: manifest.path.clone(),
             segments: Vec::new(), // TODO add fn to extract intensity Segments from manifest.toml
         })
@@ -67,8 +63,7 @@ impl Intensities {
         wavelengths: &[u16],
         intensities: &[f64],
     ) -> Result<(), Error> {
-        let ipc = self.ipc.as_mut().expect("dataset open for writing");
-        ipc.builder.push(measurement, wavelengths, intensities);
+        self.ipc.builder.push(measurement, wavelengths, intensities);
         self.check()
     }
 
@@ -100,14 +95,11 @@ impl Sink for Intensities {
     });
 
     fn write(&mut self) -> Result<(), Error> {
-        self.ipc.as_mut().expect("dataset open for writing").flush()
+        self.ipc.flush().map_err(Into::into)
     }
 
     fn check(&mut self) -> Result<(), Error> {
-        self.ipc
-            .as_mut()
-            .expect("dataset open for writing")
-            .try_flush()
+        self.ipc.try_flush().map_err(Into::into)
     }
 
     fn reset(&mut self, segments: Vec<Segment>) -> Result<(), Error> {

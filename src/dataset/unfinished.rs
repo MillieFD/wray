@@ -73,6 +73,23 @@ impl Dataset {
         }
     }
 
+    /// Create a new dataset.
+    fn create(path: &Path, cfg: &Config) -> Result<Self, Error> {
+        let timestamp: u64 = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("system clock before unix epoch")
+            .as_micros()
+            .try_into()
+            .expect("microsecond timestamp exceeds u64");
+        let manifest = Manifest::new(path, timestamp, cfg);
+        Ok(Self {
+            wavelengths: Wavelengths::new(&manifest)?,
+            measurements: Measurements::new(&manifest)?,
+            intensities: Intensities::new(&manifest)?,
+            manifest,
+        })
+    }
+
     /// Mark a measurement ID as a calibration measurement.
     pub fn calibration(&mut self, id: u32) {
         self.manifest.calibrations.push(id);
@@ -122,23 +139,6 @@ impl Dataset {
     }
 
     /* ---------------------------------------------------------------------------- Private */
-
-    /// Create a brand-new dataset.
-    fn create(path: &Path, cfg: &Config) -> Result<Self, Error> {
-        let timestamp: u64 = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("system clock before unix epoch")
-            .as_micros()
-            .try_into()
-            .expect("microsecond timestamp exceeds u64");
-        let manifest = Manifest::new(path, timestamp, cfg);
-        Ok(Self {
-            wavelengths: Wavelengths::new(&manifest)?,
-            measurements: Measurements::new(&manifest)?,
-            intensities: Intensities::new(&manifest)?,
-            manifest,
-        })
-    }
 
     /// Extract pending bytes, append as new segments, rewrite file.
     fn write_segmented(&mut self) -> Result<(), Error> {

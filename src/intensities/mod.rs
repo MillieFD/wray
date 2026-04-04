@@ -8,14 +8,12 @@ Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the conditions of the LICENSE are met.
 */
 
-/* ----------------------------------------------------------------------------- Private Modules */
-
 mod builder;
 pub(crate) mod record;
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
 
 use arrow::datatypes::DataType::{Float64, UInt16, UInt32};
@@ -23,19 +21,22 @@ use arrow::datatypes::{Field, Schema};
 
 use self::builder::Builder;
 use self::record::Record;
-use crate::Error;
 use crate::format::Segment;
 use crate::table::{self, Ipc, Sink};
+use crate::{Error, Manifest};
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
-/// Abstraction over the intensities table.
+/// Abstraction over the intensity table.
 ///
-/// Each row maps a `(measurement, wavelength)` pair to an intensity value.
-/// Rows are auto-flushed to the in-memory IPC stream every 32 768 rows.
+/// Each [`Record`] maps a `Measurement ID: u32` and `wavelength ID: u16` pair to an `Intensity:
+/// f64` value. See `FORMAT.md` for more details.
+///
+/// New data accumulates in memory with [`Self::push`] and is automatically written to disk on
+/// [`Drop`] or when [`Builder::is_full`] returns `true`
 pub struct Intensities {
-    /// IPC stream writer (`None` when read-only).
-    ipc: Option<Ipc<Builder>>,
+    /// IPC stream writer for appending new intensity measurements.
+    ipc: Ipc<Builder>,
     /// Path to the dataset file.
     path: PathBuf,
     /// Location descriptors for written intensity segments.
@@ -43,20 +44,13 @@ pub struct Intensities {
 }
 
 impl Intensities {
-    /// Create or open an intensities table for the dataset at `path`.
-    ///
-    /// When `writable` is `true`, an IPC stream writer is initialised.
-    pub(crate) fn new(
-        path: impl AsRef<Path>,
-        segments: Vec<Segment>,
-        writable: bool,
-    ) -> Result<Self, Error> {
-        let path = path.as_ref().to_path_buf();
-        let ipc = match writable {
-            true => Some(Ipc::new(Self::new_stream()?, Self::schema(), Builder::default())),
-            false => None,
-        };
-        Ok(Self { ipc, path, segments })
+    /// TODO add doc comment
+    pub(crate) fn new(manifest: &Manifest) -> Result<Self, Error> {
+        Ok(Self {
+            ipc: Ipc::new(Self::new_stream()?, Self::schema(), Builder::default()),
+            path: manifest.path.clone(),
+            segments: Vec::new(), // TODO add fn to extract intensity Segments from manifest.toml
+        })
     }
 
     /// Record intensity values for a single measurement.
@@ -69,10 +63,10 @@ impl Intensities {
         wavelengths: &[u16],
         intensities: &[f64],
     ) -> Result<(), Error> {
-        let ipc = self.ipc.as_mut().expect("dataset open for writing");
-        ipc.builder.push(measurement, wavelengths, intensities);
+        self.ipc.builder.push(measurement, wavelengths, intensities);
         self.check()
     }
+
     /// Read all intensity records from the dataset.
     ///
     /// Automatically selects stream-based or memory-mapped reading based on
@@ -101,11 +95,11 @@ impl Sink for Intensities {
     });
 
     fn write(&mut self) -> Result<(), Error> {
-        self.ipc.as_mut().expect("dataset open for writing").flush()
+        self.ipc.flush().map_err(Into::into)
     }
 
     fn check(&mut self) -> Result<(), Error> {
-        self.ipc.as_mut().expect("dataset open for writing").try_flush()
+        self.ipc.try_flush().map_err(Into::into)
     }
 
     fn reset(&mut self, segments: Vec<Segment>) -> Result<(), Error> {
@@ -128,4 +122,3 @@ impl Sink for Intensities {
         table::consolidate(&self.path, &self.segments, &Self::SCHEMA)
     }
 }
-

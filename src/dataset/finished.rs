@@ -25,7 +25,7 @@ use crate::wavelengths::Wavelengths;
 /// or [`unfinished::Dataset::finish`](super::unfinished::Dataset::finish).
 pub struct Dataset {
     /// Experiment metadata.
-    manifest: Manifest,
+    pub manifest: Manifest,
     /// Wavelengths table (read-only).
     pub wavelengths: Wavelengths,
     /// Measurements table (read-only).
@@ -37,27 +37,12 @@ pub struct Dataset {
 impl Dataset {
     /// Construct a finished dataset from a [`Manifest`].
     pub fn new(manifest: Manifest) -> Result<Self, Error> {
-        // TODO Tidy up field constructors
-        let wavelengths = Wavelengths::new(&manifest.path, manifest.wavelengths.clone(), false)?;
-        let measurements = Measurements::new(
-            &manifest.path,
-            manifest.measurements.clone(),
-            false,
-            manifest.timestamp,
-            0,
-        )?;
-        let intensities = Intensities::new(&manifest.path, manifest.intensities.clone(), false)?;
         Ok(Self {
-            wavelengths,
-            measurements,
-            intensities,
+            wavelengths: Wavelengths::new(&manifest)?,
+            measurements: Measurements::new(&manifest)?,
+            intensities: Intensities::new(&manifest)?,
             manifest,
         })
-    }
-
-    /// Borrow the experiment metadata.
-    pub const fn manifest(&self) -> &Manifest {
-        &self.manifest
     }
 }
 

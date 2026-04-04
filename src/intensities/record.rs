@@ -8,6 +8,8 @@ Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the conditions of the LICENSE are met.
 */
 
+/* ----------------------------------------------------------------------------- Private Imports */
+
 use std::fmt::{Display, Formatter};
 
 use arrow::array::{AsArray, RecordBatch};
@@ -20,9 +22,9 @@ use crate::table;
 /// A single intensity entry returned by read queries.
 #[derive(Copy, Clone, Debug, Default, PartialEq, PartialOrd)]
 pub struct Record {
-    /// Measurement ID. Foreign key to the measurements table.
+    /// Measurement ID. Foreign key to [`measurements`](crate::measurements::Measurements).
     pub measurement: u32,
-    /// Wavelength ID. Foreign key to the wavelengths table.
+    /// Wavelength ID. Foreign key to [`wavelengths`](crate::wavelengths::Wavelengths).
     pub wavelength: u16,
     /// Measured spectral intensity.
     pub intensity: f64,
@@ -31,21 +33,22 @@ pub struct Record {
 /* ----------------------------------------------------------------------- Trait Implementations */
 
 impl table::Record for Record {
+    /// Deserialize the [`Record`] from the borrowed [`RecordBatch`] at the specified `row` index.
     fn read(batch: &RecordBatch, row: usize) -> Self {
         Self {
             measurement: batch
                 .column_by_name("measurement")
-                .expect("missing 'measurement' column")
+                .expect("Missing 'measurement' column")
                 .as_primitive::<UInt32Type>()
                 .value(row),
             wavelength: batch
                 .column_by_name("wavelength")
-                .expect("missing 'wavelength' column")
+                .expect("Missing 'wavelength' column")
                 .as_primitive::<UInt16Type>()
                 .value(row),
             intensity: batch
                 .column_by_name("intensity")
-                .expect("missing 'intensity' column")
+                .expect("Missing 'intensity' column")
                 .as_primitive::<Float64Type>()
                 .value(row),
         }
@@ -53,6 +56,15 @@ impl table::Record for Record {
 }
 
 impl Display for Record {
+    /// Formats the value using the given formatter.
+    ///
+    /// # Display or Debug?
+    ///
+    /// Use [`Display`] to show the intensity value only e.g. when printing results to `stout`.
+    /// Use [`Debug`][1] to show the full record including measurement and wavelength IDs.
+    /// See trait-level documentation for more information.
+    ///
+    /// [1]: core::fmt::Debug
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.intensity.fmt(f)
     }

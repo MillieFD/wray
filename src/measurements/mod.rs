@@ -15,7 +15,7 @@ pub(crate) mod record;
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::SystemTime;
@@ -25,9 +25,9 @@ use arrow::datatypes::{Field, Schema};
 
 use self::builder::Builder;
 use self::record::Record;
-use crate::Error;
 use crate::format::Segment;
 use crate::table::{self, Ipc, Sink};
+use crate::{Error, Manifest};
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
@@ -38,7 +38,7 @@ use crate::table::{self, Ipc, Sink};
 /// are nullable `Float32`.
 pub struct Measurements {
     /// IPC stream writer (`None` when read-only).
-    ipc: Option<Ipc<Builder>>,
+    ipc: Ipc<Builder>,
     /// Next auto-increment measurement ID.
     next: AtomicU32,
     /// Manifest epoch in microseconds since UNIX epoch.
@@ -50,27 +50,19 @@ pub struct Measurements {
 }
 
 impl Measurements {
-    /// Create or open a measurements table for the dataset at `path`.
-    ///
-    /// When `writable` is `true`, an IPC stream writer is initialised.
-    pub(crate) fn new(
-        path: impl AsRef<Path>,
-        segments: Vec<Segment>,
-        writable: bool,
-        epoch: u64,
-        next_id: u32,
-    ) -> Result<Self, Error> {
-        let path = path.as_ref().to_path_buf();
-        let ipc = match writable {
-            true => Some(Ipc::new(Self::new_stream()?, Self::schema(), Builder::default())),
-            false => None,
-        };
+    /// Create or open a measurement table for the dataset at `path`.
+    pub(crate) fn new(manifest: &Manifest) -> Result<Self, Error> {
         Ok(Self {
-            ipc,
-            next: AtomicU32::new(next_id),
-            epoch,
-            path,
-            segments,
+            ipc: Ipc::new(Self::new_stream()?, Self::schema(), Builder::default()),
+            next: table::read_stream(&manifest.path, &manifest.measurements)?
+                .iter()
+                .map(|r: &Record| r.id)
+                .max()
+                .map_or(0, |id| id + 1)
+                .into(),
+            epoch: manifest.timestamp,
+            path: manifest.path.clone(),
+            segments: Vec::new(),
         })
     }
 
@@ -81,7 +73,7 @@ impl Measurements {
     /// All optional coordinate fields are feature-gated. Unneeded fields can be
     /// disabled in `cargo.toml` for improved ergonomics. This does not change
     /// the underlying `schema`.
-    #[allow(clippy::too_many_arguments, reason = "User may require all fields")]
+    #[allow(clippy::too_many_arguments, reason = "user may require all fields")]
     pub fn push(
         &mut self,
         #[cfg(feature = "x")] x: Option<f32>,
@@ -92,19 +84,19 @@ impl Measurements {
         #[cfg(feature = "c")] c: Option<f32>,
         integration: u32,
     ) -> Result<u32, Error> {
-        let now: u64 = SystemTime::now()
+        let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("system clock before unix epoch")
-            .as_micros()
-            .try_into()
-            .expect("microsecond timestamp exceeds u64");
-        let timestamp = now.saturating_sub(self.epoch);
+            .map_err(Into::<Error>::into)? // Great Scott! System clock before Unix epoch.
+            .as_micros();
+        let timestamp: u64 = now.saturating_sub(self.epoch as u128).try_into()?;
         let id = self.next.fetch_add(1, Ordering::SeqCst);
-        let ipc = self.ipc.as_mut().expect("dataset open for writing");
-        ipc.builder.push(id, timestamp, x, y, z, a, b, c, integration);
+        self.ipc
+            .builder
+            .push(id, timestamp, x, y, z, a, b, c, integration);
         self.check()?;
         Ok(id)
     }
+
     /// Read all measurement records from the dataset.
     ///
     /// Automatically selects stream-based or memory-mapped reading based on
@@ -139,11 +131,15 @@ impl Sink for Measurements {
     });
 
     fn write(&mut self) -> Result<(), Error> {
-        self.ipc.as_mut().expect("dataset open for writing").flush()
+        self.ipc.flush()
     }
 
     fn check(&mut self) -> Result<(), Error> {
-        self.ipc.as_mut().expect("dataset open for writing").try_flush()
+        self.ipc
+            .as_mut()
+            .expect("dataset open for writing")
+            .try_flush()
+            .map_err(Into::into)
     }
 
     fn reset(&mut self, segments: Vec<Segment>) -> Result<(), Error> {
@@ -166,4 +162,3 @@ impl Sink for Measurements {
         table::consolidate(&self.path, &self.segments, &Self::SCHEMA)
     }
 }
-

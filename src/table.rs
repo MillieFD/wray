@@ -49,8 +49,8 @@ pub(crate) trait Build {
 /// Encapsulates the flush → batch → write → reset lifecycle shared by all
 /// three table writers ([`Wavelengths`], [`Measurements`], [`Intensities`]).
 pub(crate) struct Ipc<B: Build> {
-    /// Arrow IPC stream writer (taken on [`take_bytes`](Self::take_bytes)).
-    stream: Option<Stream>,
+    /// Arrow IPC stream writer.
+    stream: Stream,
     /// Arrow schema for [`RecordBatch`] construction.
     schema: Arc<Schema>,
     /// Column builder for pending rows.
@@ -61,70 +61,45 @@ impl<B: Build> Ipc<B> {
     /// Create a new [`Ipc`] writer.
     pub const fn new(stream: Stream, schema: Arc<Schema>, builder: B) -> Self {
         Self {
-            stream: Some(stream),
+            stream,
             schema,
             builder,
         }
     }
 
-    /// Flush pending rows from the builder into the IPC stream.
-    ///
-    /// ### Errors
-    ///
-    /// Returns [`ArrowError::IpcError`] if the [`StreamWriter`] is closed.
-    pub fn flush(&mut self) -> Result<(), Error> {
-        // TODO Change return type to use `ArrowError`
-        if self.builder.len() == 0 {
-            return Ok(());
-        }
-        let batch = RecordBatch::try_new(self.schema.clone(), self.builder.columns())?;
-        self.stream
-            .as_mut()
-            .expect("Stream is None")
-            .write(&batch)?;
-        // TODO Don't store `stream` as `Option` → Remove need for `expect`
-        Ok(())
-    }
-
     /// Flush if the builder has reached its capacity threshold.
-    pub fn try_flush(&mut self) -> Result<(), Error> {
+    pub fn try_flush(&mut self) -> Result<(), ArrowError> {
         match self.builder.is_full() {
             true => self.flush(),
             false => Ok(()),
         }
     }
 
-    /// Flush, finish the stream, and extract the serialised IPC bytes.
+    /// Flush pending rows from the builder into the IPC [`Stream`].
     ///
-    /// Returns an empty [`Vec`] when the builder has no pending rows and no
-    /// batches have been written to the stream.
-    pub fn take_bytes(&mut self) -> Result<Vec<u8>, Error> {
-        if self.builder.len() == 0 && self.stream.is_none() {
-            return Ok(Vec::new());
-        }
-        self.flush()?;
-        self.stream
-            .take()
-            .expect("stream alive")
-            .into_inner()?
-            .into_inner()
-            .map_err(|e| Error::Io(e.into_error()))
-    }
-
-    /// Replace the consumed stream with a fresh one.
-    pub fn reset(&mut self, stream: Stream) {
-        self.stream = Some(stream);
+    /// ### Returns
+    ///
+    /// - [`Ok`] if data is written to the [`Stream`] successfully.
+    /// - [`IpcError`][1] if an error occurs during [`Batch`][2] initialisation.
+    ///
+    /// [1]: ArrowError::IpcError
+    /// [2]: RecordBatch::try_new
+    pub fn flush(&mut self) -> Result<(), ArrowError> {
+        let batch = RecordBatch::try_new(self.schema.clone(), self.builder.columns())?;
+        self.stream.write(&batch)
     }
 }
 
 /* ---------------------------------------------------------------------------------- Sink Trait */
 
-/// All functions necessary to store data in a table.
+/// Data storage trait.
 ///
-/// Each table struct implements this trait. The [`push`] method is **not** part
-/// of the trait because each table has a unique signature.
+/// Implementors can store data using the Apache Arrow IPC format.
 ///
-/// [`push`]: crate::wavelengths::Wavelengths::push
+/// ### Push
+///
+/// `push` is **not** included in this trait because each [`Sink`] requires a unique function
+/// signature depending on the schema.
 pub(crate) trait Sink {
     /// Lazily initialised Arrow schema for this table.
     const SCHEMA: LazyLock<Arc<Schema>>;
@@ -150,10 +125,10 @@ pub(crate) trait Sink {
 
     /// Clone the shared schema [`Arc`].
     fn schema() -> Arc<Schema> {
-        Self::SCHEMA.clone()
+        Self::SCHEMA.clone() // Inexpensive Arc Clone
     }
 
-    /// Create a new [`StreamWriter`] backed by an in-memory [`Vec<u8>`].
+    /// Create a new [`Stream`] backed by an in-memory [`Vec<u8>`].
     ///
     /// ### Errors
     ///
@@ -177,22 +152,13 @@ pub trait Record: Copy + Clone + Debug + Default + PartialEq + PartialOrd + Disp
 
 /* ------------------------------------------------------------------------- Shared Read Helpers */
 
-/// Read records from Arrow IPC **stream** segments using zero-copy
-/// [`Take`](std::io::Take) windows.
-///
-/// Opens the file at `path`, iterates `segments`, and for each one creates a
-/// [`StreamReader`](arrow::ipc::reader::StreamReader) via
-/// [`Segment::stream`](Segment::stream). Records are extracted
-/// row-by-row via [`Record::read`].
-pub(crate) fn read_stream<P, R>(path: P, segments: &[Segment]) -> Result<Vec<R>, Error>
+/// Read records from Arrow IPC **stream** segments using zero-copy [`Take`][1] windows.
+pub(crate) fn read_stream<'a, I, P, R>(path: P, segments: I) -> Result<Vec<R>, Error>
 where
+    I: IntoIterator<Item = &'a Segment>,
     P: AsRef<Path>,
     R: Record,
 {
-    // TODO Change `signature` in fn signature to an iterator with <Item = Segment>
-    if segments.is_empty() {
-        return Ok(Vec::new());
-    }
     let mut file = File::open(path)?;
     let mut records = Vec::new();
     'outer: for segment in segments {

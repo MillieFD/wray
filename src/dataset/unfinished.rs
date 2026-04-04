@@ -18,8 +18,7 @@ use crate::Error;
 use crate::format::{Config, Format, HEADER, Header, Manifest, Segment};
 use crate::intensities::Intensities;
 use crate::measurements::Measurements;
-use crate::measurements::record::Record as MsRecord;
-use crate::table::{self, Sink};
+use crate::table::Sink;
 use crate::wavelengths::Wavelengths;
 
 /* ------------------------------------------------------------------------------ Public Exports */
@@ -28,16 +27,19 @@ use crate::wavelengths::Wavelengths;
 ///
 /// # Lifecycle
 ///
-/// 1. **Create** a new file with [`new`](Self::new).
-/// 2. **Push** wavelengths, measurements, and intensities via the public table
-///    fields.
-/// 3. [`close`](Self::close) the file once all data has been written.
-/// 4. Reopen with [`new`](Self::new) to append additional data.
-/// 5. Seal with [`finish`](Self::finish) for read-only access, or create a
-///    snapshot with [`snapshot`](Self::snapshot).
+/// 1. **Create** a new file with [`new`][1].
+/// 2. **Push** wavelengths, measurements, and intensities via the public table fields.
+/// 3. [`close`][2] the file once all data has been written.
+/// 4. Reopen with [`new`][1] to append additional data.
+/// 5. Seal with [`finish`][3] for read-only access, or create a snapshot with [`snapshot`][4].
+///
+/// [1]: Self::new
+/// [2]: Self::close
+/// [3]: Self::finish
+/// [4]: Self::snapshot
 pub struct Dataset {
     /// Experiment metadata.
-    manifest: Manifest,
+    pub manifest: Manifest,
     /// Wavelengths table.
     pub wavelengths: Wavelengths,
     /// Measurements table.
@@ -61,26 +63,36 @@ impl Dataset {
         let path = path.as_ref();
         match path.exists() {
             true => {
-                let (header, manifest) = super::read_header(path)?;
+                let header = Header::new(path)?;
                 if header.format != Format::Unfinished {
-                    return Err(Error::InvalidFormat(
-                        "cannot append to finished dataset",
-                    ));
+                    return Err(Error::InvalidFormat("cannot append to finished dataset"));
                 }
-                Self::try_from(manifest)
+                header.manifest()?.try_into()
             }
             false => Self::create(path, cfg),
         }
     }
 
+    /// Create a new dataset.
+    fn create(path: &Path, cfg: &Config) -> Result<Self, Error> {
+        let timestamp: u64 = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("system clock before unix epoch")
+            .as_micros()
+            .try_into()
+            .expect("microsecond timestamp exceeds u64");
+        let manifest = Manifest::new(path, timestamp, cfg);
+        Ok(Self {
+            wavelengths: Wavelengths::new(&manifest)?,
+            measurements: Measurements::new(&manifest)?,
+            intensities: Intensities::new(&manifest)?,
+            manifest,
+        })
+    }
+
     /// Mark a measurement ID as a calibration measurement.
     pub fn calibration(&mut self, id: u32) {
         self.manifest.calibrations.push(id);
-    }
-
-    /// Borrow the experiment metadata.
-    pub const fn manifest(&self) -> &Manifest {
-        &self.manifest
     }
 
     /* ----------------------------------------------------------------------------- Write */
@@ -91,7 +103,7 @@ impl Dataset {
     ///
     /// Returns [`Error`] if the file cannot be written.
     pub fn close(mut self) -> Result<(), Error> {
-        self.write_to_disk()?;
+        self.write_segmented()?;
         std::mem::forget(self);
         Ok(())
     }
@@ -120,41 +132,13 @@ impl Dataset {
     /// # Errors
     ///
     /// Returns [`Error`] if either file cannot be written or consolidated.
-    pub fn snapshot(
-        &mut self,
-        path: impl AsRef<Path>,
-    ) -> Result<super::finished::Dataset, Error> {
-        self.write_to_disk()?;
+    pub fn snapshot(&mut self, path: impl AsRef<Path>) -> Result<super::finished::Dataset, Error> {
+        self.write_segmented()?;
         let manifest = self.write_finished(path.as_ref())?;
         super::finished::Dataset::new(manifest)
     }
 
     /* ---------------------------------------------------------------------------- Private */
-
-    /// Create a brand-new dataset.
-    fn create(path: &Path, cfg: &Config) -> Result<Self, Error> {
-        let timestamp: u64 = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("system clock before unix epoch")
-            .as_micros()
-            .try_into()
-            .expect("microsecond timestamp exceeds u64");
-        let manifest = Manifest::new(path, timestamp, cfg);
-        let wavelengths = Wavelengths::new(path, Vec::new(), true)?;
-        let measurements = Measurements::new(path, Vec::new(), true, timestamp, 0)?;
-        let intensities = Intensities::new(path, Vec::new(), true)?;
-        Ok(Self {
-            wavelengths,
-            measurements,
-            intensities,
-            manifest,
-        })
-    }
-
-    /// Flush pending data and write to disk.
-    fn write_to_disk(&mut self) -> Result<(), Error> {
-        self.write_segmented()
-    }
 
     /// Extract pending bytes, append as new segments, rewrite file.
     fn write_segmented(&mut self) -> Result<(), Error> {
@@ -206,6 +190,7 @@ impl Dataset {
         let manifest_bytes = manifest_str.as_bytes();
 
         let header = Header {
+            path: self.manifest.path.clone(),
             manifest: Segment {
                 offset: SeekFrom::Start(offset),
                 length: manifest_bytes.len() as u64,
@@ -234,7 +219,8 @@ impl Dataset {
         std::io::Write::write_all(&mut file, manifest_bytes)?;
 
         self.wavelengths.reset(self.manifest.wavelengths.clone())?;
-        self.measurements.reset(self.manifest.measurements.clone())?;
+        self.measurements
+            .reset(self.manifest.measurements.clone())?;
         self.intensities.reset(self.manifest.intensities.clone())?;
 
         Ok(())
@@ -281,6 +267,7 @@ impl Dataset {
         let manifest_bytes = manifest_str.as_bytes();
 
         let header = Header {
+            path: path.to_path_buf(),
             manifest: Segment {
                 offset: SeekFrom::Start(offset),
                 length: manifest_bytes.len() as u64,
@@ -305,26 +292,11 @@ impl Dataset {
 impl TryFrom<Manifest> for Dataset {
     type Error = Error;
 
-    /// Construct from a pre-read [`Manifest`].
-    ///
-    /// The manifest's [`path`](Manifest::path) field must be set before calling;
-    /// [`read_header`](super::read_header) sets it automatically.
     fn try_from(manifest: Manifest) -> Result<Self, Self::Error> {
-        let records: Vec<MsRecord> = table::read_stream(&manifest.path, &manifest.measurements)?;
-        let next_id = records.iter().map(|r| r.id).max().map_or(0, |id| id + 1);
-        let wavelengths = Wavelengths::new(&manifest.path, manifest.wavelengths.clone(), true)?;
-        let measurements = Measurements::new(
-            &manifest.path,
-            manifest.measurements.clone(),
-            true,
-            manifest.timestamp,
-            next_id,
-        )?;
-        let intensities = Intensities::new(&manifest.path, manifest.intensities.clone(), true)?;
         Ok(Self {
-            wavelengths,
-            measurements,
-            intensities,
+            wavelengths: Wavelengths::new(&manifest)?,
+            measurements: Measurements::new(&manifest)?,
+            intensities: Intensities::new(&manifest)?,
             manifest,
         })
     }
@@ -332,6 +304,6 @@ impl TryFrom<Manifest> for Dataset {
 
 impl Drop for Dataset {
     fn drop(&mut self) {
-        let _ = self.write_to_disk();
+        let _ = self.write_segmented();
     }
 }

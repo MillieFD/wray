@@ -10,69 +10,91 @@ modification, are permitted provided that the conditions of the LICENSE are met.
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
+use std::array::TryFromSliceError;
 use std::fmt::{Debug, Display, Formatter};
+use std::num::TryFromIntError;
+use std::str::Utf8Error;
+use std::time::SystemTimeError;
 
 use arrow::error::ArrowError;
+use serde::{Deserialize, Serialize};
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
-/// Errors produced by the `wray` library.
-#[derive(Debug)]
-pub enum Error {
-    /// Apache Arrow operation failed.
-    Arrow(ArrowError),
-    /// File-system I/O failed.
-    Io(std::io::Error),
-    /// TOML serialisation or deserialisation failed.
-    Toml(String),
-    /// A required Arrow column was not found.
-    MissingColumn(String),
-    /// The `.wray` binary layout is invalid or unsupported.
-    InvalidFormat(&'static str),
+/// Errors that can occur when using the `wray` format.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+pub struct Error {
+    msg: String,
+}
+
+impl Error {
+    pub(super) fn new<S: Display>(msg: S) -> Self {
+        Self {
+            msg: msg.to_string(),
+        }
+    }
 }
 
 /* ----------------------------------------------------------------------- Trait Implementations */
 
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        match self {
-            Self::Arrow(e) => write!(f, "Arrow: {e}"),
-            Self::Io(e) => write!(f, "IO: {e}"),
-            Self::Toml(e) => write!(f, "TOML: {e}"),
-            Self::MissingColumn(c) => write!(f, "missing column: {c}"),
-            Self::InvalidFormat(msg) => write!(f, "invalid format: {msg}"),
-        }
+        write!(f, "Wray Error : {}", self.msg)
     }
 }
 
 impl std::error::Error for Error {}
 
+impl From<String> for Error {
+    fn from(msg: String) -> Self {
+        Self::new(msg)
+    }
+}
+
 impl From<ArrowError> for Error {
     fn from(e: ArrowError) -> Self {
-        Self::Arrow(e)
+        Self::new(e)
     }
 }
 
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Self {
-        Self::Io(e)
+        Self::new(e)
     }
 }
 
 impl From<toml::ser::Error> for Error {
     fn from(e: toml::ser::Error) -> Self {
-        Self::Toml(e.to_string())
+        Self::new(e)
     }
 }
 
 impl From<toml::de::Error> for Error {
     fn from(e: toml::de::Error) -> Self {
-        Self::Toml(e.to_string())
+        Self::new(e)
     }
 }
 
-impl From<std::str::Utf8Error> for Error {
-    fn from(_: std::str::Utf8Error) -> Self {
-        Self::InvalidFormat("manifest is not valid UTF-8")
+impl From<Utf8Error> for Error {
+    fn from(e: Utf8Error) -> Self {
+        Self::new(e)
+    }
+}
+
+impl From<TryFromSliceError> for Error {
+    fn from(e: TryFromSliceError) -> Self {
+        Self::new(e)
+    }
+}
+
+impl From<TryFromIntError> for Error {
+    fn from(e: TryFromIntError) -> Self {
+        Self::new(e)
+    }
+}
+
+impl From<SystemTimeError> for Error {
+    fn from(e: SystemTimeError) -> Self {
+        Self::new(e)
     }
 }

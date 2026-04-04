@@ -15,7 +15,6 @@ pub mod unfinished;
 
 /* ----------------------------------------------------------------------------- Private Imports */
 
-use std::io::{Read, Seek};
 use std::path::Path;
 
 use crate::Error;
@@ -25,9 +24,7 @@ use crate::format::{Format, Header, Manifest};
 
 /// A `.wr` dataset for storing optical spectroscopy data.
 ///
-/// Provides type-safe separation between writable
-/// ([`Unfinished`](unfinished::Dataset)) and sealed read-only
-/// ([`Finished`](finished::Dataset)) states.
+/// Provides type-safe separation between [`Unfinished`] and [`Finished`] file states.
 pub enum Dataset {
     /// Writable dataset backed by Arrow IPC stream segments.
     Unfinished(unfinished::Dataset),
@@ -38,31 +35,24 @@ pub enum Dataset {
 impl Dataset {
     /// Open an existing `.wr` file.
     ///
-    /// Returns [`Unfinished`](Self::Unfinished) for appendable files and
-    /// [`Finished`](Self::Finished) for sealed read-only files.
-    ///
     /// # Errors
     ///
     /// Returns [`Error`] if the file cannot be read, the header is invalid,
     /// or the manifest TOML is malformed.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
-        let path = path.as_ref();
-        let (header, manifest) = read_header(path)?;
+        let header = Header::new(path)?;
+        let manifest = header.manifest()?;
         match header.format {
-            Format::Finished => {
-                finished::Dataset::try_from(manifest).map(Self::Finished)
-            }
-            Format::Unfinished => {
-                unfinished::Dataset::try_from(manifest).map(Self::Unfinished)
-            }
+            Format::Finished => finished::Dataset::try_from(manifest).map(Self::Finished),
+            Format::Unfinished => unfinished::Dataset::try_from(manifest).map(Self::Unfinished),
         }
     }
 
     /// Borrow the experiment metadata.
     pub fn manifest(&self) -> &Manifest {
         match self {
-            Self::Unfinished(ds) => ds.manifest(),
-            Self::Finished(ds) => ds.manifest(),
+            Self::Unfinished(dataset) => &dataset.manifest,
+            Self::Finished(dataset) => &dataset.manifest,
         }
     }
 
@@ -73,18 +63,4 @@ impl Dataset {
             Self::Unfinished(_) => false,
         }
     }
-}
-
-/* ---------------------------------------------------------------------------- Helper Functions */
-
-/// Read the [`Header`] and [`Manifest`] from a `.wr` file.
-pub(crate) fn read_header(path: &Path) -> Result<(Header, Manifest), Error> {
-    let mut file = std::fs::File::open(path)?;
-    let header = Header::read(&mut file)?;
-    file.seek(header.manifest.offset)?;
-    let mut buf = vec![0u8; header.manifest.length as usize];
-    file.read_exact(&mut buf)?;
-    let mut manifest: Manifest = toml::from_str(std::str::from_utf8(&buf)?)?;
-    manifest.path = path.to_path_buf();
-    Ok((header, manifest))
 }

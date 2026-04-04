@@ -49,8 +49,8 @@ pub(crate) trait Build {
 /// Encapsulates the flush → batch → write → reset lifecycle shared by all
 /// three table writers ([`Wavelengths`], [`Measurements`], [`Intensities`]).
 pub(crate) struct Ipc<B: Build> {
-    /// Arrow IPC stream writer (taken on [`take_bytes`](Self::take_bytes)).
-    stream: Option<Stream>,
+    /// Arrow IPC stream writer.
+    stream: Stream,
     /// Arrow schema for [`RecordBatch`] construction.
     schema: Arc<Schema>,
     /// Column builder for pending rows.
@@ -61,7 +61,7 @@ impl<B: Build> Ipc<B> {
     /// Create a new [`Ipc`] writer.
     pub const fn new(stream: Stream, schema: Arc<Schema>, builder: B) -> Self {
         Self {
-            stream: Some(stream),
+            stream,
             schema,
             builder,
         }

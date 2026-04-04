@@ -21,3 +21,14 @@ Remove the `Segment` struct and use the Arrow `RecordBatch` design only.
 - The `wavelengths` table becomes an Arrow dictionary batch
 - The `intensities` and `measurements` batches can be interleaved
 - The Arrow footer records which batch(es) belong to each table
+
+Before implementing, ensure this proposal aligns with how Apache Arrow *actually* works.
+
+### Side Effects
+
+This update may require a switch from the Arrow IPC streaming format (no footer) to the Arrow Feather format (with
+footer). Since the Feather format is always in a ready-to-read state, we can simultaneously remove the
+`dataset::unfinished` module and `Dataset` enum; consolidating functionality into a single `Dataset` struct which
+support reading & writing data. Include an explanation of these changes and their effects in and PR.
+
+Update [FORMAT.md](FORMAT.md) to reflect these changes. 

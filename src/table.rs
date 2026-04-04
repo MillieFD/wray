@@ -67,53 +67,26 @@ impl<B: Build> Ipc<B> {
         }
     }
 
-    /// Flush pending rows from the builder into the IPC stream.
-    ///
-    /// ### Errors
-    ///
-    /// Returns [`ArrowError::IpcError`] if the [`StreamWriter`] is closed.
-    pub fn flush(&mut self) -> Result<(), Error> {
-        // TODO Change return type to use `ArrowError`
-        if self.builder.len() == 0 {
-            return Ok(());
-        }
-        let batch = RecordBatch::try_new(self.schema.clone(), self.builder.columns())?;
-        self.stream
-            .as_mut()
-            .expect("Stream is None")
-            .write(&batch)?;
-        // TODO Don't store `stream` as `Option` → Remove need for `expect`
-        Ok(())
-    }
-
     /// Flush if the builder has reached its capacity threshold.
-    pub fn try_flush(&mut self) -> Result<(), Error> {
+    pub fn try_flush(&mut self) -> Result<(), ArrowError> {
         match self.builder.is_full() {
             true => self.flush(),
             false => Ok(()),
         }
     }
 
-    /// Flush, finish the stream, and extract the serialised IPC bytes.
+    /// Flush pending rows from the builder into the IPC [`Stream`].
     ///
-    /// Returns an empty [`Vec`] when the builder has no pending rows and no
-    /// batches have been written to the stream.
-    pub fn take_bytes(&mut self) -> Result<Vec<u8>, Error> {
-        if self.builder.len() == 0 && self.stream.is_none() {
-            return Ok(Vec::new());
-        }
-        self.flush()?;
-        self.stream
-            .take()
-            .expect("stream alive")
-            .into_inner()?
-            .into_inner()
-            .map_err(|e| Error::Io(e.into_error()))
-    }
-
-    /// Replace the consumed stream with a fresh one.
-    pub fn reset(&mut self, stream: Stream) {
-        self.stream = Some(stream);
+    /// ### Returns
+    ///
+    /// - [`Ok`] if data is written to the [`Stream`] successfully.
+    /// - [`IpcError`][1] if an error occurs during [`Batch`][2] initialisation.
+    ///
+    /// [1]: ArrowError::IpcError
+    /// [2]: RecordBatch::try_new
+    pub fn flush(&mut self) -> Result<(), ArrowError> {
+        let batch = RecordBatch::try_new(self.schema.clone(), self.builder.columns())?;
+        self.stream.write(&batch)
     }
 }
 

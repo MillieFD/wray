@@ -27,10 +27,13 @@ use crate::{Error, Manifest};
 
 /* ------------------------------------------------------------------------------ Public Exports */
 
-/// Abstraction over the intensities table.
+/// Abstraction over the intensity table.
 ///
-/// Each row maps a `(measurement, wavelength)` pair to an intensity value.
-/// Rows are auto-flushed to the in-memory IPC stream every 32 768 rows.
+/// Each [`Record`] maps a `Measurement ID: u32` and `wavelength ID: u16` pair to an `Intensity:
+/// f64` value. See `FORMAT.md` for more details.
+///
+/// New data accumulates in memory with [`Self::push`] and is automatically written to disk on
+/// [`Drop`] or when [`Builder::is_full`] returns `true`
 pub struct Intensities {
     /// IPC stream writer for appending new intensity measurements.
     ipc: Ipc<Builder>,

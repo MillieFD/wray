@@ -92,12 +92,14 @@ impl<B: Build> Ipc<B> {
 
 /* ---------------------------------------------------------------------------------- Sink Trait */
 
-/// All functions necessary to store data in a table.
+/// Data storage trait.
 ///
-/// Each table struct implements this trait. The [`push`] method is **not** part
-/// of the trait because each table has a unique signature.
+/// Implementors can store data using the Apache Arrow IPC format.
 ///
-/// [`push`]: crate::wavelengths::Wavelengths::push
+/// ### Push
+///
+/// `push` is **not** included in this trait because each [`Sink`] requires a unique function
+/// signature depending on the schema.
 pub(crate) trait Sink {
     /// Lazily initialised Arrow schema for this table.
     const SCHEMA: LazyLock<Arc<Schema>>;
@@ -123,10 +125,10 @@ pub(crate) trait Sink {
 
     /// Clone the shared schema [`Arc`].
     fn schema() -> Arc<Schema> {
-        Self::SCHEMA.clone()
+        Self::SCHEMA.clone() // Inexpensive Arc Clone
     }
 
-    /// Create a new [`StreamWriter`] backed by an in-memory [`Vec<u8>`].
+    /// Create a new [`Stream`] backed by an in-memory [`Vec<u8>`].
     ///
     /// ### Errors
     ///
